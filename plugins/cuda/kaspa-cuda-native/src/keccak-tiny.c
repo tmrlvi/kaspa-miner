@@ -82,19 +82,6 @@ __device__ static inline void keccakf(void* state) {
 /******** The FIPS202-defined functions. ********/
 
 /*** Some helper macros. ***/
-
-#define _(S) do { S } while (0)
-#define FOR(i, ST, L, S) \
-  _(for (size_t i = 0; i < L; i += ST) { S; })
-#define mkapply_ds(NAME, S)                                          \
-  __device__ static inline void NAME(uint8_t* dst,                              \
-                          const uint8_t* src,                        \
-                          size_t len) {                              \
-    FOR(i, 1, len, S);                                               \
-  }
-
-mkapply_ds(xorin, dst[i] ^= src[i])  // xorin
-
 #define P keccakf
 #define Plen 200
 
@@ -105,13 +92,14 @@ __device__ __forceinline__ static int hash(
                        uint8_t* out,
                        const uint8_t* in, size_t inlen) {
   uint8_t a[Plen] = {0};
-  memcpy(a, initP, Plen);
-  // Xor in the last block.
-  xorin(a, in, inlen);
+  for (int i=0; i<inlen/8; i++) ((uint64_t *)a)[i] = ((uint64_t *)initP)[i] ^ ((uint64_t *)in)[i];
+  for (int i=inlen/8; i<25; i++) ((uint64_t *)a)[i] = ((uint64_t *)initP)[i];
+
   // Apply P
   P(a);
   // Squeeze output.
-  memcpy(out, a, 32);
+  #pragma unroll
+  for (int i=0; i<4; i++) ((uint64_t *)out)[i] = ((uint64_t *)a)[i];
   return 0;
 }
 
