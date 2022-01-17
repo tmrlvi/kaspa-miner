@@ -3,7 +3,7 @@ use crate::Error;
 use kaspa_miner::xoshiro256starstar::Xoshiro256StarStar;
 use kaspa_miner::Worker;
 use log::info;
-use opencl3::command_queue::{CommandQueue, CL_QUEUE_PROFILING_ENABLE};
+use opencl3::command_queue::{CommandQueue, CL_QUEUE_PROFILING_ENABLE, CL_QUEUE_ON_DEVICE, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE};
 use opencl3::context::Context;
 use opencl3::device::Device;
 use opencl3::event::{release_event, retain_event, wait_for_events};
@@ -88,10 +88,15 @@ impl Worker for OpenCLGPUWorker {
                 .wait()
                 .unwrap();
         }
+        let random_type: cl_uchar = match self.random {
+            NonceGenEnum::Lean => 0,
+            NonceGenEnum::Xoshiro => 1
+        };
         let kernel_event = ExecuteKernel::new(&self.heavy_hash)
             .set_arg(&self.hash_header)
             .set_arg(&self.matrix)
             .set_arg(&self.target)
+            .set_arg(&random_type)
             .set_arg(&self.random_state)
             .set_arg(&self.final_nonce)
             .set_arg(&self.final_hash)
@@ -248,15 +253,12 @@ impl OpenCLGPUWorker {
                 .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_binary failed", name)),
         };
 
-        let heavy_hash = match random {
-            NonceGenEnum::Lean => Kernel::create(&program, "heavy_hash_lean")
-                .unwrap_or_else(|_| panic!("{}::Kernel::create failed", name)),
-            NonceGenEnum::Xoshiro => Kernel::create(&program, "heavy_hash_xoshiro")
-                .unwrap_or_else(|_| panic!("{}::Kernel::create failed", name)),
-        };
+        let heavy_hash = Kernel::create(&program, "heavy_hash")
+            .unwrap_or_else(|_| panic!("{}::Kernel::create failed", name));
+
 
         let queue =
-            CommandQueue::create_with_properties(&context, context.default_device(), CL_QUEUE_PROFILING_ENABLE, 0)
+            CommandQueue::create_with_properties(&context, device.id(), CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, 0)
                 .unwrap_or_else(|_| panic!("{}::CommandQueue::create_with_properties failed", name));
 
         let final_nonce = Buffer::<cl_ulong>::create(context_ref, CL_MEM_READ_WRITE, 1, ptr::null_mut())
@@ -381,6 +383,14 @@ fn from_source(context: &Context, device: &Device, options: &str) -> Result<Prog
 
     compile_options += &match device.gfxip_minor_amd() {
         Ok(minor) => format!("-D __GFXIP_MINOR__={} ", minor),
+        Err(_) => String::new(),
+    };
+
+    compile_options += &match device.pcie_id_amd() {
+        Ok(_) => {
+            let device_name = device.name().unwrap_or_else(|_| "Unknown".into()).to_lowercase();
+            format!("-D __{}__", device_name)
+        },
         Err(_) => String::new(),
     };
 

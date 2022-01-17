@@ -103,7 +103,7 @@ STATIC inline void keccakf(void* state) {
 #define Plen 200
 
 /** The sponge-based hash construction. **/
-STATIC inline int hash(const int variant , uint8_t* out,
+STATIC inline void hash(const int variant , uint8_t* out,
                        const uint8_t* in) {
   private uint8_t sizes[2] = {10, 4};
   private uint8_t a[2][Plen] = {
@@ -118,7 +118,6 @@ STATIC inline int hash(const int variant , uint8_t* out,
   // Squeeze output.
   #pragma unroll
   for (size_t i = 0; i < 8; i++) ((uint32_t *)out)[i] = ((uint32_t *)(a[variant]))[i];
-  return 0;
 }
 
 /* RANDOM NUMBER GENERATOR BASED ON MWC64X                          */
@@ -179,40 +178,79 @@ typedef uint64_t uint256_t[4];
 #define QUARTER_MATRIX_SIZE 16
 #define HASH_HEADER_SIZE 72
 
+#define RANDOM_TYPE_LEAN 0
+#define RANDOM_TYPE_XOSHIRO 1
+
 #define LT_U256(X,Y) (X[3] != Y[3] ? X[3] < Y[3] : X[2] != Y[2] ? X[2] < Y[2] : X[1] != Y[1] ? X[1] < Y[1] : X[0] < Y[0])
 
 #ifndef cl_khr_int64_base_atomics
 global int lock = false;
 #endif
 
-uint32_t STATIC inline amul4bit(constant uint32_t packed_vec1[32], uint32_t packed_vec2[32]) {
+#if __PLATFORM__ == NVIDIA_CUDA && (__COMPUTE_MAJOR__ > 6 || (__COMPUTE_MAJOR__ == 6 && __COMPUTE_MINOR__ >= 1))
+#define amul4bit(X,Y) _amul4bit((constant uint32_t*)(X), (private uint32_t*)(Y))
+uint32_t STATIC inline _amul4bit(__constant uint32_t packed_vec1[32], uint32_t packed_vec2[32]) {
     // We assume each 32 bits have four values: A0 B0 C0 D0
     uint32_t res = 0;
     #pragma unroll
     for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
-        #if __PLATFORM__ == NVIDIA_CUDA && (__COMPUTE_MAJOR__ > 6 || (__COMPUTE_MAJOR__ == 6 && __COMPUTE_MINOR__ >= 1))
-        asm("dp4a.u32.u32" " %0, %1, %2, %3;": "=r" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "r" (res));
-        #elif (__FORCE_AMD_V_DOT4_U32_U8__ == 1) || ((__GFXIP_MAJOR__ == 9) && (__GFXIP_MINOR__ == 6 || __GFXIP_MINOR__ == 8)) || ((__GFXIP_MAJOR__ == 10) && (__GFXIP_MINOR__ == 11 || __GFXIP_MINOR__ == 12 || __GFXIP_MINOR__ >= 3)) || __GFXIP_MAJOR__ > 10
-        __asm__("v_dot4_u32_u8" " %0, %1, %2, %3;": "=v" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "r" (res));
-        #else
-        res += ((constant char4 *)packed_vec1)[i].x*((char4 *)packed_vec2)[i].x;
-        res += ((constant char4 *)packed_vec1)[i].y*((char4 *)packed_vec2)[i].y;
-        res += ((constant char4 *)packed_vec1)[i].z*((char4 *)packed_vec2)[i].z;
-        res += ((constant char4 *)packed_vec1)[i].w*((char4 *)packed_vec2)[i].w;
-        #endif
-    }
+		asm("dp4a.u32.u32" " %0, %1, %2, %3;": "=r" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "r" (res));
 
+    }
     return res;
 }
+#elif defined(__gfx906__) || defined(__gfx908__) || defined(__gfx1011__) || defined(__gfx1012__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
+#define amul4bit(X,Y) _amul4bit((constant uint32_t*)(X), (private uint32_t*)(Y))
+uint32_t STATIC inline _amul4bit(__constant uint32_t packed_vec1[32], uint32_t packed_vec2[32]) {
+    // We assume each 32 bits have four values: A0 B0 C0 D0
+    uint32_t res = 0;
+    #pragma unroll
+    for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
+        __asm__("v_dot4_u32_u8" " %0, %1, %2, %3;": "=v" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "v" (res));
 
-STATIC inline void heavy_hash(
+    }
+	return res;
+}
+#else
+#define amul4bit(X,Y) _amul4bit((constant uchar4*)(X), (private uchar4*)(Y))
+uint32_t STATIC inline _amul4bit(__constant uchar4 packed_vec1[32], uchar4 packed_vec2[32]) {
+    // We assume each 32 bits have four values: A0 B0 C0 D0
+    ushort4 res = 0;
+    #pragma unroll
+    for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
+        res += convert_ushort4(packed_vec1[i])*convert_ushort4(packed_vec2[i]);
+    }
+    res.s01 = res.s01 + res.s23;
+    	return res.s0 + res.s1;
+}
+#endif
+
+kernel void heavy_hash(
     __constant const uint8_t hash_header[HASH_HEADER_SIZE],
-    __constant const uint8_t matrix[MATRIX_SIZE][MATRIX_SIZE],
+    __constant const uint8_t matrix[4096],
     __constant const uint256_t target,
-    private const uint64_t nonce,
+    const uint8_t random_type,
+    global void * restrict random_state,
     volatile global uint64_t *final_nonce,
     volatile global uint64_t *final_hash
 ) {
+    int nonceId = get_global_id(0);
+
+    #ifndef cl_khr_int64_base_atomics
+    if (nonceId == 0)
+       lock = 0;
+    work_group_barrier(CLK_GLOBAL_MEM_FENCE);
+    #endif
+
+    private uint64_t nonce;
+    switch (random_type){
+      case RANDOM_TYPE_LEAN:
+        nonce = ((uint64_t *)random_state)[0] + nonceId;
+        break;
+      case RANDOM_TYPE_XOSHIRO:
+      default:
+        nonce = xoshiro256_next(((global ulong4 *)random_state) + nonceId);
+    }
 
     int64_t buffer[10];
 
@@ -231,8 +269,8 @@ STATIC inline void heavy_hash(
     }
 
     for (int rowId=0; rowId<32; rowId++){
-        uint32_t product1 = amul4bit((constant uint32_t *)matrix[(2*rowId)], (private uint32_t *)hash_part);
-        uint32_t product2 = amul4bit((constant uint32_t *)matrix[(2*rowId+1)], (private uint32_t *)hash_part);
+        uint32_t product1 = amul4bit(matrix + (2*rowId), hash_part);
+        uint32_t product2 = amul4bit(matrix + (2*rowId+1), hash_part);
 
         product1 >>= 10;
         product2 >>= 10;
@@ -257,44 +295,3 @@ STATIC inline void heavy_hash(
         for(int i=0;i<4;i++) final_hash[i] = ((uint64_t volatile *)hash_)[i];
     }*/
 }
-
-kernel void heavy_hash_xoshiro(
-     __constant const uint8_t hash_header[HASH_HEADER_SIZE],
-     __constant const uint8_t matrix[MATRIX_SIZE][MATRIX_SIZE],
-     __constant const uint256_t target,
-     global ulong4 *random_state,
-     volatile global uint64_t *final_nonce,
-     volatile global uint64_t *final_hash
- ) {
-    int nonceId = get_global_id(0);
-
-    #ifndef cl_khr_int64_base_atomics
-    if (nonceId == 0)
-       lock = 0;
-    work_group_barrier(CLK_GLOBAL_MEM_FENCE);
-    #endif
-
-    private uint64_t nonce = xoshiro256_next(random_state + nonceId);
-
-    heavy_hash(hash_header, matrix, target, nonce, final_nonce, final_hash);
- }
-
- kernel void heavy_hash_lean(
-      __constant const uint8_t hash_header[HASH_HEADER_SIZE],
-      __constant const uint8_t matrix[MATRIX_SIZE][MATRIX_SIZE],
-      __constant const uint256_t target,
-      global uint64_t *seed,
-      volatile global uint64_t *final_nonce,
-      volatile global uint64_t *final_hash
-  ) {
-     int nonceId = get_global_id(0);
-
-     #ifndef cl_khr_int64_base_atomics
-     if (nonceId == 0)
-        lock = 0;
-     work_group_barrier(CLK_GLOBAL_MEM_FENCE);
-     #endif
-
-     private uint64_t nonce = seed[0] + nonceId;
-     heavy_hash(hash_header, matrix, target, nonce, final_nonce, final_hash);
-  }
