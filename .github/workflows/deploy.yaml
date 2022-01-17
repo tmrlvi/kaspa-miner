@@ -4,94 +4,97 @@ on:
     types: [ published ]
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # Build gnu-linux on ubuntu-18.04 and musl on ubuntu latest
-        os: [ ubuntu-18.04, windows-latest, macos-latest ]
-    name: Building, ${{ matrix.os }}
-    steps:
-      - name: Fix CRLF on Windows
-        if: runner.os == 'Windows'
-        run: git config --global core.autocrlf false
-
-      - name: Fix LibOpenCL on Linux
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt update
-          sudo apt install ocl-icd-opencl-dev -y
-
-      - name: Check out code into the Go module directory
-        uses: actions/checkout@v2
-
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-
-      - name: Install CUDA Linux
-        if: runner.os == 'Linux'
-        uses: tmrlvi/cuda-toolkit@master
-        with:
-          cuda: '11.2.2'
-
-      - name: Install CUDA Windows
-        if: runner.os == 'Windows'
-        uses: tmrlvi/cuda-toolkit@master
-        with:
-          cuda: '11.5.1'
-
-      - name: Build on Linux GNU
-        if: matrix.os == 'ubuntu-18.04'
-        # We're using musl to make the binaries statically linked and portable
-        run: |
-          cargo build --target=x86_64-unknown-linux-gnu --release --all
-          asset_name="kaspa-miner-${{ github.event.release.tag_name }}-linux-gnu-amd64"
-          strip ./target/x86_64-unknown-linux-gnu/release/kaspa-miner
-          mkdir ${asset_name}
-          mv ./target/x86_64-unknown-linux-gnu/release/kaspa-miner ${asset_name}/${asset_name}
-          mv ./target/x86_64-unknown-linux-gnu/release/libkaspa*.so ${asset_name}/
-          tar czvf ${asset_name}.tgz ${asset_name}
-          echo "archive=${asset_name}.tgz" >> $GITHUB_ENV
-          echo "asset_name=${asset_name}.tgz" >> $GITHUB_ENV
-
-
-      - name: Build on Windows
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          cargo build --target=x86_64-pc-windows-msvc --release --all
-          asset_name="kaspa-miner-${{ github.event.release.tag_name }}-win64-amd64"
-          mkdir ${asset_name}
-          mv ./target/x86_64-pc-windows-msvc/release/kaspa-miner.exe ${asset_name}/${asset_name}.exe
-          mv ./target/x86_64-pc-windows-msvc/release/kaspa*.dll ${asset_name}/
-          7z a -tzip -r ${asset_name}.zip ${asset_name}
-          echo "archive=${asset_name}.zip" >> $GITHUB_ENV
-          echo "asset_name=${asset_name}.zip" >> $GITHUB_ENV
-
-      - name: Build on MacOS
-        if: matrix.os == 'macos-latest'
-        run: |
-          cargo build --target=x86_64-apple-darwin --release -p kaspa-miner -p kaspaopencl
-          asset_name="kaspa-miner-${{ github.event.release.tag_name }}-osx-amd64"
-          mv ./target/x86_64-apple-darwin/release/kaspa-miner ${asset_name}
-          echo "archive=${asset_name}" >> $GITHUB_ENV
-          echo "asset_name=${asset_name}" >> $GITHUB_ENV
-
-
-      - name: Upload release asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: "./${{ env.archive }}"
-          asset_name: "${{ env.asset_name }}"
-          asset_content_type: application/zip
+#  build:
+#    runs-on: ${{ matrix.os }}
+#    strategy:
+#      fail-fast: false
+#      matrix:
+#        # Build gnu-linux on ubuntu-18.04 and musl on ubuntu latest
+#        os: [ ubuntu-18.04, windows-latest, macos-latest ]
+#    name: Building, ${{ matrix.os }}
+#    steps:
+#      - name: Fix CRLF on Windows
+#        if: runner.os == 'Windows'
+#        run: git config --global core.autocrlf false
+#
+#      - name: Fix LibOpenCL on Linux
+#        if: runner.os == 'Linux'
+#        run: |
+#          sudo apt update
+#          sudo apt install ocl-icd-opencl-dev -y
+#
+#      - name: Check out code into the Go module directory
+#        uses: actions/checkout@v2
+#
+#      - name: Setup Rust
+#        uses: actions-rs/toolchain@v1
+#        with:
+#          profile: minimal
+#          toolchain: stable
+#          override: true
+#
+#      - name: Install CUDA Linux
+#        if: runner.os == 'Linux'
+#        uses: tmrlvi/cuda-toolkit@master
+#        with:
+#          cuda: '11.2.2'
+#
+#      - name: Install CUDA Windows
+#        if: runner.os == 'Windows'
+#        uses: tmrlvi/cuda-toolkit@master
+#        with:
+#          cuda: '11.5.1'
+#
+#      - name: Build on Linux GNU
+#        if: matrix.os == 'ubuntu-18.04'
+#        # We're using musl to make the binaries statically linked and portable
+#        run: |
+#          cargo build --target=x86_64-unknown-linux-gnu --release --all
+#          asset_name="kaspa-miner-${{ github.event.release.tag_name }}-linux-gnu-amd64"
+#          strip ./target/x86_64-unknown-linux-gnu/release/kaspa-miner
+#          mkdir ${asset_name}
+#          mv ./target/x86_64-unknown-linux-gnu/release/kaspa-miner ${asset_name}/${asset_name}
+#          mv ./target/x86_64-unknown-linux-gnu/release/libkaspa*.so ${asset_name}/
+#          tar czvf ${asset_name}.tgz ${asset_name}
+#          echo "archive=${asset_name}.tgz" >> $GITHUB_ENV
+#          echo "asset_name=${asset_name}.tgz" >> $GITHUB_ENV
+#
+#
+#      - name: Build on Windows
+#        if: matrix.os == 'windows-latest'
+#        shell: bash
+#        run: |
+#          cargo build --target=x86_64-pc-windows-msvc --release --all
+#          asset_name="kaspa-miner-${{ github.event.release.tag_name }}-win64-amd64"
+#          mkdir ${asset_name}
+#          mv ./target/x86_64-pc-windows-msvc/release/kaspa-miner.exe ${asset_name}/${asset_name}.exe
+#          mv ./target/x86_64-pc-windows-msvc/release/kaspa*.dll ${asset_name}/
+#          7z a -tzip -r ${asset_name}.zip ${asset_name}
+#          echo "archive=${asset_name}.zip" >> $GITHUB_ENV
+#          echo "asset_name=${asset_name}.zip" >> $GITHUB_ENV
+#
+#      - name: Build on MacOS
+#        if: matrix.os == 'macos-latest'
+#        run: |
+#          RUSTFLAGS="-framework OpenCL" cargo build --target=x86_64-apple-darwin --release -p kaspa-miner -p kaspaopencl
+#          asset_name="kaspa-miner-${{ github.event.release.tag_name }}-osx-amd64"
+#          mkdir ${asset_name}
+#          mv ./target/x86_64-apple-darwin/release/kaspa-miner ${asset_name}/${asset_name}
+#          mv ./target/x86_64-apple-darwin/release/libkaspa*.so ${asset_name}/
+#          tar czvf ${asset_name}.tgz ${asset_name}
+#          echo "archive=${asset_name}.tgz" >> $GITHUB_ENV
+#          echo "asset_name=${asset_name}.tgz" >> $GITHUB_ENV
+#
+#
+#      - name: Upload release asset
+#        uses: actions/upload-release-asset@v1
+#        env:
+#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#        with:
+#          upload_url: ${{ github.event.release.upload_url }}
+#          asset_path: "./${{ env.archive }}"
+#          asset_name: "${{ env.asset_name }}"
+#          asset_content_type: application/zip
 
   intergrations:
     runs-on: ubuntu-18.04
@@ -129,10 +132,10 @@ jobs:
           binary_name="kaspa-miner-${{ github.event.release.tag_name }}-linux-gnu-amd64"
           asset_name="kaspa-miner-${{ matrix.itegration }}"
           strip ./target/x86_64-unknown-linux-gnu/release/kaspa-miner
-          mkdir ${asset_name}
-          mv ./target/x86_64-unknown-linux-gnu/release/kaspa-miner ${asset_name}/${binary_name}
-          mv ./target/x86_64-unknown-linux-gnu/release/libkaspa*.so ${asset_name}/
-          bash integrations/${{ matrix.itegration }}/build.sh "${{ github.event.release.tag_name }}" "${binary_name}" "${asset_name}" 
+          mkdir kaspa-miner
+          mv ./target/x86_64-unknown-linux-gnu/release/kaspa-miner kaspa-miner/${binary_name}
+          mv ./target/x86_64-unknown-linux-gnu/release/libkaspa*.so kaspa-miner/
+          bash integrations/${{ matrix.itegration }}/build.sh "${{ github.event.release.tag_name }}" "${binary_name}" kaspa-miner 
           echo "archive=${asset_name}.tgz" >> $GITHUB_ENV
           echo "asset_name=${asset_name}.tgz" >> $GITHUB_ENV
 
