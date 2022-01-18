@@ -39,7 +39,7 @@ if [ "$diffTime" -lt "$maxDelay" ]; then
         brands=(${gpu_stats[1]})
         temps=(${gpu_stats[2]})
         fans=(${gpu_stats[3]})
-        count=${#busids[@]}
+        gpu_count=${#busids[@]}
 
         hash_arr=()
         busid_arr=()
@@ -47,17 +47,23 @@ if [ "$diffTime" -lt "$maxDelay" ]; then
         temp_arr=()
         lines=()
 
-        avg_hash_per_gpu=$((total_hashrate/$count))
+        if [ $(gpu-detect NVIDIA) -gt 0 ]; then
+                brand_gpu_count=$(gpu-detect NVIDIA)
+                BRAND_MINER="nvidia"
+        elif [ $(gpu-detect AMD) -gt 0 ]; then
+                brand_gpu_count=$(gpu-detect AMD)
+                BRAND_MINER="amd"
+        fi
 
-        idx=0
-        for(( i=0; i < count; i++ )); do
+        # TODO, get hash per gpu
+        avg_hashrate=$((total_hashrate/brand_gpu_count))
+        for(( i=0; i < gpu_count; i++ )); do
+                [[ "${brands[i]}" != $BRAND_MINER ]] && continue
                 [[ "${busids[i]}" =~ ^([A-Fa-f0-9]+): ]]
                 busid_arr+=($((16#${BASH_REMATCH[1]})))
                 temp_arr+=(${temps[i]})
                 fan_arr+=(${fans[i]})
-                # TODO, get hash per gpu
-                hash_arr+=($avg_hash_per_gpu)
-                ((idx++))
+                hash_arr+=($avg_hashrate)
         done
 
         hash_json=`printf '%s\n' "${hash_arr[@]}" | jq -cs '.'`
