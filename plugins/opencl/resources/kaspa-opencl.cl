@@ -4,7 +4,6 @@
 #else
 #define STATIC static
 #endif
-
 /* TYPES */
 
 typedef uchar uint8_t;
@@ -51,6 +50,7 @@ constant STATIC const uint64_t RC[24] = \
 
 /** Magic from fancyIX/sgminer-phi2-branch **/
 #if PLATFORM == OPENCL_PLATFORM_AMD
+#define __FORCE_AMD_V_DOT8_U32_U4__ 1
 #pragma OPENCL EXTENSION cl_amd_media_ops : enable
 #define rol(X,S) _rol(as_uint2(X), S)
 static ulong _rol(const uint2 vv, const int r)
@@ -83,7 +83,7 @@ STATIC inline void keccakf(void* state) {
   uint64_t t = 0;
   uint8_t x, y;
 
-  //#pragma unroll
+  #pragma unroll
   for (int i = 0; i < 24; i++) {
     // Theta
     FOR5(x, 1,
@@ -213,8 +213,7 @@ uint32_t STATIC inline _amul4bit(__constant uint32_t packed_vec1[32], uint32_t p
     uint32_t res = 0;
     #pragma unroll
     for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
-		asm("dp4a.u32.u32" " %0, %1, %2, %3;": "=r" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "r" (res));
-
+        asm("dp4a.u32.u32" " %0, %1, %2, %3;": "=r" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "r" (res));
     }
     return res;
 }
@@ -224,10 +223,15 @@ uint32_t STATIC inline _amul4bit(__constant uint32_t packed_vec1[32], uint32_t p
     // We assume each 32 bits have four values: A0 B0 C0 D0
     uint32_t res = 0;
     #pragma unroll
+#if __FORCE_AMD_V_DOT8_U32_U4__ == 1
+    for (int i=0; i<8; i++) {
+        __asm__("v_dot8_u32_u4" " %0, %1, %2, %3;": "=v" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "v" (res));
+    }
+#else
     for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
         __asm__("v_dot4_u32_u8" " %0, %1, %2, %3;": "=v" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "v" (res));
-
     }
+#endif
 	return res;
 }
 #else
@@ -274,30 +278,38 @@ kernel void heavy_hash(
     int64_t buffer[10];
 
     // header
+    #pragma unroll
     for(int i=0; i<9; i++) buffer[i] = hash_header[i];
     // data
     buffer[9] = nonce;
 
-    Hash hash_;
+    Hash hash_, hash2_;
     hash_.hash = hash(powP, buffer, 10);
-
+    #if __FORCE_AMD_V_DOT8_U32_U4__ == 1
+    #else
     private uchar hash_part[64];
+    #pragma unroll
     for (int i=0; i<32; i++) {
          hash_part[2*i] = (hash_.bytes[i] & 0xF0) >> 4;
          hash_part[2*i+1] = hash_.bytes[i] & 0x0F;
     }
-
+    #endif
+    #pragma unroll
     for (int rowId=0; rowId<32; rowId++){
+    #if __FORCE_AMD_V_DOT8_U32_U4__ == 1
+        uint32_t product1 = amul4bit(matrix + 64*rowId, hash_.bytes);
+        uint32_t product2 = amul4bit(matrix + 64*rowId+32, hash_.bytes);
+    #else
         uint32_t product1 = amul4bit(matrix + 128*rowId, hash_part);
         uint32_t product2 = amul4bit(matrix + 128*rowId+64, hash_part);
-
+    #endif
         product1 >>= 10;
         product2 >>= 10;
-        //hash_.bytes[rowId] ^= bitselect(product1, product2, 0x0000000FU);
-        hash_.bytes[rowId] ^= (uint8_t)((product1 << 4) | (uint8_t)(product2));
+//        hash2_.bytes[rowId] = hash_.bytes[rowId] ^ bitselect(product1, product2, 0x0000000FU);
+        hash2_.bytes[rowId] = hash_.bytes[rowId] ^ ((uint8_t)((product1 << 4) | (uint8_t)(product2)));
     }
 
-    hash_.hash = hash(heavyP, (ulong *)hash_.bytes, 4);
+    hash_.hash = hash(heavyP, (ulong *)hash2_.bytes, 4);
     if (LT_U256(hash_.hash, target)){
         //printf("%lu: %lu < %lu: %d %d\n", nonce, ((uint64_t *)hash_)[3], target[3], ((uint64_t *)hash_)[3] < target[3], LT_U256((uint64_t *)hash_, target));
         #ifdef cl_khr_int64_base_atomics

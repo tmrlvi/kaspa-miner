@@ -3,7 +3,7 @@ use crate::Error;
 use kaspa_miner::xoshiro256starstar::Xoshiro256StarStar;
 use kaspa_miner::Worker;
 use log::info;
-use opencl3::command_queue::{CommandQueue, CL_QUEUE_PROFILING_ENABLE, CL_QUEUE_ON_DEVICE, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE};
+use opencl3::command_queue::{CommandQueue, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE};
 use opencl3::context::Context;
 use opencl3::device::Device;
 use opencl3::event::{release_event, retain_event, wait_for_events};
@@ -38,6 +38,7 @@ pub struct OpenCLGPUWorker {
     target: Buffer<cl_ulong>,
 
     events: Vec<cl_event>,
+    experimental_amd: bool,
 }
 
 impl Worker for OpenCLGPUWorker {
@@ -47,8 +48,10 @@ impl Worker for OpenCLGPUWorker {
     }
 
     fn load_block_constants(&mut self, hash_header: &[u8; 72], matrix: &[[u16; 64]; 64], target: &[u64; 4]) {
-        let cl_uchar_matrix = matrix.iter().flat_map(|row| row.map(|v| v as cl_uchar)).collect::<Vec<cl_uchar>>();
-
+        let cl_uchar_matrix = match self.experimental_amd {
+            true => matrix.iter().flat_map(|row| row.chunks(2).map(|v| ((v[0] << 4) | v[1]) as cl_uchar)).collect::<Vec<cl_uchar>>(),
+            false => matrix.iter().flat_map(|row| row.map(|v| v as cl_uchar)).collect::<Vec<cl_uchar>>(),
+        };
         self.queue
             .enqueue_write_buffer(&mut self.final_nonce, CL_BLOCKING, 0, &[0], &[])
             .map_err(|e| e.to_string())
@@ -177,9 +180,18 @@ impl OpenCLGPUWorker {
         let context_ref = unsafe { Arc::as_ptr(&context).as_ref().unwrap() };
 
         let options = match experimental_amd {
-            true => "-D __FORCE_AMD_V_DOT4_U32_U8__=1 ",
+            // true => "-D __FORCE_AMD_V_DOT4_U32_U8__=1 ",
+            true => "-D __FORCE_AMD_V_DOT8_U32_U4__=1 ",
             false => "",
         };
+
+        let experimental_amd_use = match device.name().unwrap_or_else(|_| "Unknown".into()).to_lowercase().as_str() {
+            "tahiti" => false,
+            "ellesmere" => false,
+            "gfx1010" => false,
+            _ => true,
+        };
+
         let program = match use_binary {
             true => {
                 let device_name = device.name().unwrap_or_else(|_| "Unknown".into()).to_lowercase();
@@ -206,6 +218,12 @@ impl OpenCLGPUWorker {
                     "gfx908" => Program::create_and_build_from_binary(
                         &context,
                         &[include_bytes!("../resources/bin/gfx908_kaspa-opencl.bin")],
+                        "",
+                    )
+                    .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_binary failed", name)),
+                    "gfx1010" => Program::create_and_build_from_binary(
+                        &context,
+                        &[include_bytes!("../resources/bin/gfx1010_kaspa-opencl.bin")],
                         "",
                     )
                     .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_binary failed", name)),
@@ -240,17 +258,15 @@ impl OpenCLGPUWorker {
                     )
                     .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_binary failed", name)),
                     other => {
-                        info!(
-                            "{}: Found device {} without prebuilt binary. Trying to building from source.",
+                        panic!(
+                            "{}: Found device {} without prebuilt binary. Trying to run without --opencl-amd-binary.",
                             name, other
                         );
-                        from_source(&context, &device, options)
-                            .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_binary failed", name))
                     }
                 }
             }
             false => from_source(&context, &device, options)
-                .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_binary failed", name)),
+                .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_source failed", name)),
         };
 
         let heavy_hash = Kernel::create(&program, "heavy_hash")
@@ -340,6 +356,7 @@ impl OpenCLGPUWorker {
             matrix,
             target,
             events: Vec::<cl_event>::new(),
+            experimental_amd: ((experimental_amd | use_binary) & experimental_amd_use),
         })
     }
 }
@@ -354,7 +371,6 @@ fn from_source(context: &Context, device: &Device, options: &str) -> Result<Prog
         info!("Compiling with OpenCl 2");
         compile_options += CL_STD_2_0;
     }
-
     compile_options += &match Platform::new(device.platform().unwrap()).name() {
         Ok(name) => format!(
             "-D __PLATFORM__={} ",
