@@ -49,7 +49,7 @@ constant STATIC const uint64_t RC[24] = \
 
 
 /** Magic from fancyIX/sgminer-phi2-branch **/
-#if PLATFORM == OPENCL_PLATFORM_AMD
+#if (PLATFORM == OPENCL_PLATFORM_AMD) && defined(cl_amd_media_ops)
 #define __FORCE_AMD_V_DOT8_U32_U4__ 1
 #pragma OPENCL EXTENSION cl_amd_media_ops : enable
 #define rol(X,S) _rol(as_uint2(X), S)
@@ -83,7 +83,9 @@ STATIC inline void keccakf(void* state) {
   uint64_t t = 0;
   uint8_t x, y;
 
+#if defined(cl_amd_media_ops)
   #pragma unroll
+#endif
   for (int i = 0; i < 24; i++) {
     // Theta
     FOR5(x, 1,
