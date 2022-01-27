@@ -50,7 +50,7 @@ __device__ static inline void keccakf(void* state) {
   uint64_t t = 0;
   uint8_t x, y;
 
-  //#pragma unroll
+  #pragma unroll 6
   for (int i = 0; i < 24; i++) {
     // Theta
     FOR5(x, 1,
@@ -87,19 +87,22 @@ __device__ static inline void keccakf(void* state) {
 
 
 /** The sponge-based hash construction. **/
-__device__ __forceinline__ static int hash(
+__device__ __forceinline__ static void hash(
                        const uint8_t initP[Plen],
                        uint8_t* out,
-                       const uint8_t* in, size_t inlen) {
+                       const uint8_t* in) {
   uint8_t a[Plen] = {0};
-  for (int i=0; i<inlen/8; i++) ((uint64_t *)a)[i] = ((uint64_t *)initP)[i] ^ ((uint64_t *)in)[i];
-  for (int i=inlen/8; i<25; i++) ((uint64_t *)a)[i] = ((uint64_t *)initP)[i];
+
+  #pragma unroll
+  for (int i=0; i<10; i++) ((uint64_t *)a)[i] = ((uint64_t *)initP)[i] ^ ((uint64_t *)in)[i];
+  #pragma unroll
+  for (int i=10; i<25; i++) ((uint64_t *)a)[i] = ((uint64_t *)initP)[i];
 
   // Apply P
   P(a);
   // Squeeze output.
   #pragma unroll
   for (int i=0; i<4; i++) ((uint64_t *)out)[i] = ((uint64_t *)a)[i];
-  return 0;
+
 }
 

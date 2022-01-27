@@ -127,17 +127,17 @@ constant const uchar powP[200] = { 0x3d, 0xd8, 0xf6, 0xa1, 0x0d, 0xff, 0x3c, 0x1
 constant const uchar heavyP[200] = { 0x09, 0x85, 0x24, 0xb2, 0x52, 0x4c, 0xd7, 0x3a, 0x16, 0x42, 0x9f, 0x2f, 0x0e, 0x9b, 0x62, 0x79, 0xee, 0xf8, 0xc7, 0x16, 0x48, 0xff, 0x14, 0x7a, 0x98, 0x64, 0x05, 0x80, 0x4c, 0x5f, 0xa7, 0x11, 0xda, 0xce, 0xee, 0x44, 0xdf, 0xe0, 0x20, 0xe7, 0x69, 0x40, 0xf3, 0x14, 0x2e, 0xd8, 0xc7, 0x72, 0xba, 0x35, 0x89, 0x93, 0x2a, 0xff, 0x00, 0xc1, 0x62, 0xc4, 0x0f, 0x25, 0x40, 0x90, 0x21, 0x5e, 0x48, 0x6a, 0xcf, 0x0d, 0xa6, 0xf9, 0x39, 0x80, 0x0c, 0x3d, 0x2a, 0x79, 0x9f, 0xaa, 0xbc, 0xa0, 0x26, 0xa2, 0xa9, 0xd0, 0x5d, 0xc0, 0x31, 0xf4, 0x3f, 0x8c, 0xc1, 0x54, 0xc3, 0x4c, 0x1f, 0xd3, 0x3d, 0xcc, 0x69, 0xa7, 0x01, 0x7d, 0x6b, 0x6c, 0xe4, 0x93, 0x24, 0x56, 0xd3, 0x5b, 0xc6, 0x2e, 0x44, 0xb0, 0xcd, 0x99, 0x3a, 0x4b, 0xf7, 0x4e, 0xb0, 0xf2, 0x34, 0x54, 0x83, 0x86, 0x4c, 0x77, 0x16, 0x94, 0xbc, 0x36, 0xb0, 0x61, 0xe9, 0x07, 0x07, 0xcc, 0x65, 0x77, 0xb1, 0x1d, 0x8f, 0x7e, 0x39, 0x6d, 0xc4, 0xba, 0x80, 0xdb, 0x8f, 0xea, 0x58, 0xca, 0x34, 0x7b, 0xd3, 0xf2, 0x92, 0xb9, 0x57, 0xb9, 0x81, 0x84, 0x04, 0xc5, 0x76, 0xc7, 0x2e, 0xc2, 0x12, 0x51, 0x67, 0x9f, 0xc3, 0x47, 0x0a, 0x0c, 0x29, 0xb5, 0x9d, 0x39, 0xbb, 0x92, 0x15, 0xc6, 0x9f, 0x2f, 0x31, 0xe0, 0x9a, 0x54, 0x35, 0xda, 0xb9, 0x10, 0x7d, 0x32, 0x19, 0x16 };
 
 /** The sponge-based hash construction. **/
-STATIC inline ulong4 hash(constant const ulong *initP, const ulong* in, const size_t inlen) {
+STATIC inline void hash(constant const ulong *initP, const ulong* in, ulong4* out) {
   private ulong a[25];
   // Xor in the last block.
   #pragma unroll
-  for (size_t i = 0; i < inlen; i++) a[i] = initP[i] ^ in[i];
+  for (size_t i = 0; i < 10; i++) a[i] = initP[i] ^ in[i];
   #pragma unroll
-  for (size_t i = inlen; i < 25; i++) a[i] = initP[i];
+  for (size_t i = 10; i < 25; i++) a[i] = initP[i];
   // Apply P
   P(a);
   // Squeeze output.
-  return ((ulong4 *)(a))[0];
+  *out = ((ulong4 *)(a))[0];
 }
 
 /* RANDOM NUMBER GENERATOR BASED ON MWC64X                          */
@@ -209,19 +209,19 @@ global int lock = false;
 #endif
 
 #if __PLATFORM__ == NVIDIA_CUDA && (__COMPUTE_MAJOR__ > 6 || (__COMPUTE_MAJOR__ == 6 && __COMPUTE_MINOR__ >= 1))
-#define amul4bit(X,Y) _amul4bit((constant uint32_t*)(X), (private uint32_t*)(Y))
-uint32_t STATIC inline _amul4bit(__constant uint32_t packed_vec1[32], uint32_t packed_vec2[32]) {
+#define amul4bit(X,Y,Z) _amul4bit((constant uint32_t*)(X), (private uint32_t*)(Y), (uint32_t *)(Z))
+void STATIC inline _amul4bit(__constant uint32_t packed_vec1[32], uint32_t packed_vec2[32], uint32_t *ret) {
     // We assume each 32 bits have four values: A0 B0 C0 D0
     uint32_t res = 0;
     #pragma unroll
     for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
         asm("dp4a.u32.u32" " %0, %1, %2, %3;": "=r" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "r" (res));
     }
-    return res;
+    *ret = res;
 }
 #elif defined(__gfx906__) || defined(__gfx908__) || defined(__gfx1011__) || defined(__gfx1012__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
-#define amul4bit(X,Y) _amul4bit((constant uint32_t*)(X), (private uint32_t*)(Y))
-uint32_t STATIC inline _amul4bit(__constant uint32_t packed_vec1[32], uint32_t packed_vec2[32]) {
+#define amul4bit(X,Y,Z) _amul4bit((constant uint32_t*)(X), (private uint32_t*)(Y), (uint32_t *)(Z))
+void STATIC inline _amul4bit(__constant uint32_t packed_vec1[32], uint32_t packed_vec2[32], uint32_t *ret) {
     // We assume each 32 bits have four values: A0 B0 C0 D0
     uint32_t res = 0;
     #pragma unroll
@@ -234,11 +234,11 @@ uint32_t STATIC inline _amul4bit(__constant uint32_t packed_vec1[32], uint32_t p
         __asm__("v_dot4_u32_u8" " %0, %1, %2, %3;": "=v" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "v" (res));
     }
 #endif
-	return res;
+    *ret = res;
 }
 #else
-#define amul4bit(X,Y) _amul4bit((constant uchar4*)(X), (private uchar4*)(Y))
-uint32_t STATIC inline _amul4bit(__constant uchar4 packed_vec1[32], uchar4 packed_vec2[32]) {
+#define amul4bit(X,Y,Z) _amul4bit((constant uchar4*)(X), (private uchar4*)(Y), (uint32_t *)(Z))
+void STATIC inline _amul4bit(__constant uchar4 packed_vec1[32], uchar4 packed_vec2[32], uint32_t *ret) {
     // We assume each 32 bits have four values: A0 B0 C0 D0
     ushort4 res = 0;
     #pragma unroll
@@ -246,9 +246,10 @@ uint32_t STATIC inline _amul4bit(__constant uchar4 packed_vec1[32], uchar4 packe
         res += convert_ushort4(packed_vec1[i])*convert_ushort4(packed_vec2[i]);
     }
     res.s01 = res.s01 + res.s23;
-    return res.s0 + res.s1;
+    *ret = res.s0 + res.s1;
 }
 #endif
+#define SWAP4( x ) as_uint( as_uchar4( x ).wzyx )
 
 kernel void heavy_hash(
     __constant const ulong hash_header[9],
@@ -270,7 +271,8 @@ kernel void heavy_hash(
     private uint64_t nonce;
     switch (random_type){
       case RANDOM_TYPE_LEAN:
-        nonce = ((uint64_t *)random_state)[0] + nonceId;
+        // nonce = ((uint64_t *)random_state)[0] + nonceId;
+        nonce = (((uint64_t *)random_state)[0]& 0xFFFFFFFF) ^ ((ulong)SWAP4(nonceId) << 32);
         break;
       case RANDOM_TYPE_XOSHIRO:
       default:
@@ -286,7 +288,7 @@ kernel void heavy_hash(
     buffer[9] = nonce;
 
     Hash hash_, hash2_;
-    hash_.hash = hash(powP, buffer, 10);
+    hash(powP, buffer, &hash_.hash);
     #if __FORCE_AMD_V_DOT8_U32_U4__ == 1
     #else
     private uchar hash_part[64];
@@ -296,22 +298,30 @@ kernel void heavy_hash(
          hash_part[2*i+1] = hash_.bytes[i] & 0x0F;
     }
     #endif
+    uint32_t product1, product2;
     #pragma unroll
     for (int rowId=0; rowId<32; rowId++){
     #if __FORCE_AMD_V_DOT8_U32_U4__ == 1
-        uint32_t product1 = amul4bit(matrix + 64*rowId, hash_.bytes);
-        uint32_t product2 = amul4bit(matrix + 64*rowId+32, hash_.bytes);
+        amul4bit(matrix + 64*rowId, hash_.bytes, &product1);
+        amul4bit(matrix + 64*rowId+32, hash_.bytes, &product2);
     #else
-        uint32_t product1 = amul4bit(matrix + 128*rowId, hash_part);
-        uint32_t product2 = amul4bit(matrix + 128*rowId+64, hash_part);
+        amul4bit(matrix + 128*rowId, hash_part, &product1);
+        amul4bit(matrix + 128*rowId+64, hash_part, &product2);
     #endif
         product1 >>= 10;
         product2 >>= 10;
 //        hash2_.bytes[rowId] = hash_.bytes[rowId] ^ bitselect(product1, product2, 0x0000000FU);
         hash2_.bytes[rowId] = hash_.bytes[rowId] ^ ((uint8_t)((product1 << 4) | (uint8_t)(product2)));
     }
+    buffer[0] = hash2_.hash.x;
+    buffer[1] = hash2_.hash.y;
+    buffer[2] = hash2_.hash.z;
+    buffer[3] = hash2_.hash.w;
+    #pragma unroll
+    for(int i=4; i<10; i++) buffer[i] = 0;
 
-    hash_.hash = hash(heavyP, (ulong *)hash2_.bytes, 4);
+    hash(heavyP, buffer, &hash_.hash);
+
     if (LT_U256(hash_.hash, target)){
         //printf("%lu: %lu < %lu: %d %d\n", nonce, ((uint64_t *)hash_)[3], target[3], ((uint64_t *)hash_)[3] < target[3], LT_U256((uint64_t *)hash_, target));
         #ifdef cl_khr_int64_base_atomics
