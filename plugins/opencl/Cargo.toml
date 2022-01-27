@@ -8,7 +8,7 @@ edition = "2021"
 kaspa_miner = {path = "../../", package="kaspa-miner"}
 clap = { version = "3.0", features = ["color", "derive"]}
 env_logger = "0.9"
-opencl3 = "0.6"
+opencl3 = {version = "0.6", features = ["CL_VERSION_2_1", "CL_VERSION_2_2", "CL_VERSION_3_0"]}
 log = "0.4"
 rand = "0.8"
 

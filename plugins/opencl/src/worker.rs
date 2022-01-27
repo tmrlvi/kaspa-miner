@@ -5,7 +5,7 @@ use kaspa_miner::Worker;
 use log::info;
 use opencl3::command_queue::{CommandQueue, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE};
 use opencl3::context::Context;
-use opencl3::device::Device;
+use opencl3::device::{CL_DEVICE_IL_VERSION, Device};
 use opencl3::event::{release_event, retain_event, wait_for_events};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 use opencl3::memory::{Buffer, ClMem, CL_MAP_WRITE, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, CL_MEM_WRITE_ONLY};
@@ -97,7 +97,6 @@ impl Worker for OpenCLGPUWorker {
         };
         let kernel_event = ExecuteKernel::new(&self.heavy_hash)
             .set_arg(&self.hash_header)
-            .set_arg(&self.matrix)
             .set_arg(&self.target)
             .set_arg(&random_type)
             .set_arg(&self.random_state)
@@ -197,18 +196,12 @@ impl OpenCLGPUWorker {
                 let device_name = device.name().unwrap_or_else(|_| "Unknown".into()).to_lowercase();
                 info!("{}: Looking for binary for {}", name, device_name);
                 match device_name.as_str() {
-                    "tahiti" => Program::create_and_build_from_binary(
-                        &context,
-                        &[include_bytes!("../resources/bin/tahiti_kaspa-opencl.bin")],
-                        "",
-                    )
-                    .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_binary failed", name)),
                     "ellesmere" => Program::create_and_build_from_binary(
                         &context,
                         &[include_bytes!("../resources/bin/ellesmere_kaspa-opencl.bin")],
                         "",
                     )
-                    .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_binary failed", name)),
+                    .unwrap_or_else(|e| panic!("{}::Program::create_and_build_from_binary failed: {}", name, String::from(e))),
                     "gfx906" => Program::create_and_build_from_binary(
                         &context,
                         &[include_bytes!("../resources/bin/gfx906_kaspa-opencl.bin")],
@@ -256,7 +249,7 @@ impl OpenCLGPUWorker {
                         &[include_bytes!("../resources/bin/gfx1032_kaspa-opencl.bin")],
                         "",
                     )
-                    .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_binary failed", name)),
+                    .unwrap_or_else(|e| panic!("{}::Program::create_and_build_from_binary failed: {}", name, e.to_string())),
                     other => {
                         panic!(
                             "{}: Found device {} without prebuilt binary. Trying to run without --opencl-amd-binary.",
@@ -266,9 +259,9 @@ impl OpenCLGPUWorker {
                 }
             }
             false => from_source(&context, &device, options)
-                .unwrap_or_else(|_| panic!("{}::Program::create_and_build_from_source failed", name)),
+                .unwrap_or_else(|e| panic!("{}::Program::create_and_build_from_binary failed: {}", name, e.to_string())),
         };
-
+        info!("Kernels: {:?}", program.kernel_names());
         let heavy_hash = Kernel::create(&program, "heavy_hash")
             .unwrap_or_else(|_| panic!("{}::Kernel::create failed", name));
 
