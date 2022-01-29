@@ -155,8 +155,10 @@ impl MinerManager {
                             let block_hash = block
                                 .block_hash()
                                 .expect("We just got it from the state, we should be able to hash it");
-                            send_channel.blocking_send(KaspadMessage::submit_block(block))?;
-                            info!("Found a block: {:x}", block_hash);
+                            match send_channel.blocking_send(KaspadMessage::submit_block(block)) {
+                                Ok(()) => info!("Found a block: {:x}", block_hash),
+                                Err(e) => error!("Failed submitting block: {:x} ({})", block_hash, e.to_string()),
+                            };
                             state = None;
                             nonces[0] = 0;
                             hashes_tried.fetch_add(gpu_work.get_workload().try_into().unwrap(), Ordering::AcqRel);
@@ -209,7 +211,7 @@ impl MinerManager {
                 Ok(())
             })()
             .map_err(|e: Error| {
-                error!("GPU thread of {} crashed: {}", gpu_work.id(), e.to_string());
+                error!("{}: GPU thread crashed: {}", gpu_work.id(), e.to_string());
                 e
             })
         })

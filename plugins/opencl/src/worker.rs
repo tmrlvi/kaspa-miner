@@ -97,6 +97,7 @@ impl Worker for OpenCLGPUWorker {
         };
         let kernel_event = ExecuteKernel::new(&self.heavy_hash)
             .set_arg(&self.hash_header)
+            .set_arg(&self.matrix)
             .set_arg(&self.target)
             .set_arg(&random_type)
             .set_arg(&self.random_state)

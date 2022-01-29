@@ -50,10 +50,9 @@ constant STATIC const uint64_t RC[24] = \
 
 /** Magic from fancyIX/sgminer-phi2-branch **/
 #if (PLATFORM == OPENCL_PLATFORM_AMD) && defined(cl_amd_media_ops)
-#define __FORCE_AMD_V_DOT8_U32_U4__ 1
 #pragma OPENCL EXTENSION cl_amd_media_ops : enable
 #define rol(X,S) _rol(as_uint2(X), S)
-static ulong _rol(const uint2 vv, const int r)
+static inline ulong _rol(const uint2 vv, const int r)
 {
 	if (r <= 32)
 	{
@@ -272,7 +271,7 @@ kernel void heavy_hash(
     switch (random_type){
       case RANDOM_TYPE_LEAN:
         // nonce = ((uint64_t *)random_state)[0] + nonceId;
-        nonce = (((uint64_t *)random_state)[0]& 0xFFFFFFFF) ^ ((ulong)SWAP4(nonceId) << 32);
+        nonce = (((__global uint64_t *)random_state)[0]& 0xFFFFFFFF) ^ ((ulong)SWAP4(nonceId) << 32);
         break;
       case RANDOM_TYPE_XOSHIRO:
       default:
