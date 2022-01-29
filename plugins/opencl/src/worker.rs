@@ -367,13 +367,13 @@ fn from_source(context: &Context, device: &Device, options: &str) -> Result<Prog
     }
     compile_options += &match Platform::new(device.platform().unwrap()).name() {
         Ok(name) => format!(
-            "-D __PLATFORM__={} ",
+            "-D{} ",
             name.chars()
                 .map(|c| match c.is_ascii_alphanumeric() {
                     true => c,
                     false => '_',
                 })
-                .collect::<String>()
+                .collect::<String>().to_uppercase()
         ),
         Err(_) => String::new(),
     };
