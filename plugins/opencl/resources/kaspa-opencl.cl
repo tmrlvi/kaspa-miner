@@ -51,19 +51,22 @@ constant STATIC const uint64_t RC[24] = \
 /** Magic from fancyIX/sgminer-phi2-branch **/
 #if (PLATFORM == OPENCL_PLATFORM_AMD) && defined(cl_amd_media_ops)
 #pragma OPENCL EXTENSION cl_amd_media_ops : enable
-#define rol(X,S) _rol(as_uint2(X), S)
-static inline ulong _rol(const uint2 vv, const int r)
+#define dataType uint2
+#define as_dateType as_uint2
+static inline uint2 rol(const uint2 vv, const int r)
 {
 	if (r <= 32)
 	{
-		return as_ulong(amd_bitalign((vv).xy, (vv).yx, 32 - r));
+		return amd_bitalign((vv).xy, (vv).yx, 32 - r);
 	}
 	else
 	{
-		return as_ulong(amd_bitalign((vv).yx, (vv).xy, 64 - r));
+		return amd_bitalign((vv).yx, (vv).xy, 64 - r);
 	}
 }
 #else
+#define dataType ulong
+#define as_dateType as_ulong
 #define rol(x, s) (((x) << s) | ((x) >> (64 - s)))
 #endif
 
@@ -77,9 +80,9 @@ static inline ulong _rol(const uint2 vv, const int r)
 
 /*** Keccak-f[1600] ***/
 STATIC inline void keccakf(void* state) {
-  uint64_t* a = (uint64_t*)state;
-  uint64_t b[5] = {0};
-  uint64_t t = 0;
+  dataType* a = (dataType *)state;
+  dataType b[5] = {0};
+  dataType t = 0;
   uint8_t x, y;
 
 #if defined(cl_amd_media_ops)
@@ -110,7 +113,7 @@ STATIC inline void keccakf(void* state) {
             a[y + x] ^= bitselect(b[((x + 2) % 5)], (uint64_t) 0, b[((x + 1) % 5)]);
             ))
     // Iota
-    a[0] ^= RC[i];
+    a[0] ^= as_dateType(RC[i]);
   }
 }
 
@@ -291,14 +294,19 @@ kernel void heavy_hash(
     #if __FORCE_AMD_V_DOT8_U32_U4__ == 1
     #else
     private uchar hash_part[64];
+    #if __PLATFORM__ == NVIDIA_CUDA
     #pragma unroll
+    #endif
     for (int i=0; i<32; i++) {
          hash_part[2*i] = (hash_.bytes[i] & 0xF0) >> 4;
          hash_part[2*i+1] = hash_.bytes[i] & 0x0F;
     }
     #endif
+
     uint32_t product1, product2;
+    #if __PLATFORM__ == NVIDIA_CUDA
     #pragma unroll
+    #endif
     for (int rowId=0; rowId<32; rowId++){
     #if __FORCE_AMD_V_DOT8_U32_U4__ == 1
         amul4bit(matrix + 64*rowId, hash_.bytes, &product1);
