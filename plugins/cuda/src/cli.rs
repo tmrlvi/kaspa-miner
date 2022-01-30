@@ -11,4 +11,6 @@ pub struct CudaOpt {
     pub cuda_workload_absolute: bool,
     #[clap(long = "cuda-disable", help = "Disable cuda workers")]
     pub cuda_disable: bool,
+    #[clap(long = "cuda-blocking-sync", help = "Block threads when waiting for GPU result. Lowers CPU usage, but might cause delays resulting in red blocks. Requires higher workload.")]
+    pub cuda_blocking_sync: bool,
 }

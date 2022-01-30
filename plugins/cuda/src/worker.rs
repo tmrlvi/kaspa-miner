@@ -118,10 +118,14 @@ impl<'gpu> Worker for CudaGPUWorker<'gpu> {
 }
 
 impl<'gpu> CudaGPUWorker<'gpu> {
-    pub fn new(device_id: u32, workload: f32, is_absolute: bool) -> Result<Self, Error> {
+    pub fn new(device_id: u32, workload: f32, is_absolute: bool, blocking_sync: bool) -> Result<Self, Error> {
         info!("Starting a CUDA worker");
+        let sync_flag = match blocking_sync {
+            true => ContextFlags::SCHED_BLOCKING_SYNC,
+            false => ContextFlags::SCHED_AUTO
+        };
         let device = Device::get_device(device_id).unwrap();
-        let _context = Context::create_and_push(ContextFlags::MAP_HOST | ContextFlags::SCHED_AUTO, device)?;
+        let _context = Context::create_and_push(ContextFlags::MAP_HOST | sync_flag, device)?;
 
         let major = device.get_attribute(DeviceAttribute::ComputeCapabilityMajor)?;
         let minor = device.get_attribute(DeviceAttribute::ComputeCapabilityMinor)?;
