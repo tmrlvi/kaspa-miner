@@ -73,6 +73,7 @@ static inline uint2 rol(const uint2 vv, const int r)
 /*** Helper macros to unroll the permutation. ***/
 #define REPEAT6(e) e e e e e e
 #define REPEAT24(e) REPEAT6(e e e e)
+#define REPEAT23(e) REPEAT6(e e e) e e e e e
 #define REPEAT5(e) e e e e e
 #define FOR5(v, s, e) \
   v = 0;            \
@@ -82,39 +83,80 @@ static inline uint2 rol(const uint2 vv, const int r)
 STATIC inline void keccakf(void* state) {
   dataType* a = (dataType *)state;
   dataType b[5] = {0};
-  dataType t = 0;
+  dataType t = 0, v = 0;
   uint8_t x, y;
 
 #if defined(cl_amd_media_ops)
   #pragma unroll
 #endif
-  for (int i = 0; i < 24; i++) {
+  for (int i = 0; i < 23; i++) {
     // Theta
     FOR5(x, 1,
-         b[x] = 0;
-         FOR5(y, 5,
-              b[x] ^= a[x + y]; ))
+      b[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20];)
+
+    v = b[4]; t = b[0];
+    b[4] = b[4] ^ rol(b[1], 1);
+    b[0] = b[0] ^ rol(b[2], 1);
+    b[1] = b[1] ^ rol(b[3], 1);
+    b[2] = b[2] ^ rol(v, 1);
+    b[3] = b[3] ^ rol(t, 1);
+
     FOR5(x, 1,
-         FOR5(y, 5,
-              a[y + x] ^= b[(x + 4) % 5] ^ rol(b[(x + 1) % 5], 1); ))
+      FOR5(y, 5, a[y + x] ^= b[(x + 4) % 5]; ))
+
     // Rho and pi
     t = a[1];
-    x = 0;
-    REPEAT24(b[0] = a[pi[x]];
-             a[pi[x]] = rol(t, rho[x]);
-             t = b[0];
-             x++; )
+    x = 23;
+    REPEAT23(a[pi[x]] = rol(a[pi[x-1]], rho[x]); x--; )
+    a[pi[ 0]] = rol(        t, rho[ 0]);
+
     // Chi
-    FOR5(y,
-       5,
-       FOR5(x, 1,
-            b[x] = a[y + x];)
-       FOR5(x, 1,
-            a[y + x] ^= bitselect(b[((x + 2) % 5)], (uint64_t) 0, b[((x + 1) % 5)]);
-            ))
+    FOR5(y, 5, 
+      v = a[y]; t = a[y+1];
+      a[y  ] = bitselect(a[y  ] ^ a[y+2], a[y  ], a[y+1]);
+      a[y+1] = bitselect(a[y+1] ^ a[y+3], a[y+1], a[y+2]);
+      a[y+2] = bitselect(a[y+2] ^ a[y+4], a[y+2], a[y+3]);
+      a[y+3] = bitselect(a[y+3] ^      v, a[y+3], a[y+4]);
+      a[y+4] = bitselect(a[y+4] ^      t, a[y+4], v);
+    )
+
     // Iota
     a[0] ^= as_dateType(RC[i]);
   }
+  /*******************************************************/
+      // Theta
+    FOR5(x, 1,
+      b[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20];)
+
+    v = b[4]; t = b[0];
+    b[4] = b[4] ^ rol(b[1], 1);
+    b[0] = b[0] ^ rol(b[2], 1);
+    b[1] = b[1] ^ rol(b[3], 1);
+    b[2] = b[2] ^ rol(v, 1);
+    b[3] = b[3] ^ rol(t, 1);
+
+    a[0] ^= b[4];
+    a[1] ^= b[0]; a[6] ^= b[0];
+    a[2] ^= b[1]; a[12] ^= b[1];
+    a[3] ^= b[2]; a[18] ^= b[2];
+    a[4] ^= b[3]; a[24] ^= b[3];
+
+    // Rho and pi
+    a[1]=rol(a[pi[22]], rho[23]);
+    a[2]=rol(a[pi[16]], rho[17]);
+    a[4]=rol(a[pi[10]], rho[11]);
+    a[3]=rol(a[pi[ 4]], rho[ 5]);
+
+    // Chi
+    v = a[0];
+
+    a[0] = bitselect(a[0] ^ a[2], a[0], a[1]); 
+    a[1] = bitselect(a[1] ^ a[3], a[1], a[2]); 
+    a[2] = bitselect(a[2] ^ a[4], a[2], a[3]); 
+    a[3] = bitselect(a[3] ^    v, a[3], a[4]); 
+
+    // Iota
+    a[0] ^= as_dateType(RC[23]);
 }
 
 /******** The FIPS202-defined functions. ********/
@@ -302,7 +344,7 @@ kernel void heavy_hash(
     #endif
 
     uint32_t product1, product2;
-    #if defined(NVIDIA_CUDA)
+    #if defined(NVIDIA_CUDA) || defined(__FORCE_AMD_V_DOT8_U32_U4__)
     #pragma unroll
     #endif
     for (int rowId=0; rowId<32; rowId++){
