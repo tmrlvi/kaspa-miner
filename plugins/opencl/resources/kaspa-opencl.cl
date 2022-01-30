@@ -66,7 +66,7 @@ static inline uint2 rol(const uint2 vv, const int r)
 }
 #else
 #define dataType ulong
-#define as_dateType as_ulong
+#define as_dataType as_ulong
 #define rol(x, s) (((x) << s) | ((x) >> (64 - s)))
 #endif
 
@@ -80,8 +80,8 @@ static inline uint2 rol(const uint2 vv, const int r)
   REPEAT5(e; v += s;)
 
 /*** Keccak-f[1600] ***/
-STATIC inline void keccakf(void* state) {
-  dataType* a = (dataType *)state;
+STATIC inline void keccakf(void *state) {
+  dataType *a = (dataType *)state;
   dataType b[5] = {0};
   dataType t = 0, v = 0;
   uint8_t x, y;
@@ -121,8 +121,8 @@ STATIC inline void keccakf(void* state) {
     )
 
     // Iota
-    a[0] ^= as_dateType(RC[i]);
-  }
+    a[0] ^= as_dataType(RC[i]);
+}
   /*******************************************************/
       // Theta
     FOR5(x, 1,
@@ -156,7 +156,7 @@ STATIC inline void keccakf(void* state) {
     a[3] = bitselect(a[3] ^    v, a[3], a[4]); 
 
     // Iota
-    a[0] ^= as_dateType(RC[23]);
+    a[0] ^= as_dataType(RC[23]);
 }
 
 /******** The FIPS202-defined functions. ********/
