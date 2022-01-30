@@ -38,6 +38,7 @@ __device__ static const uint64_t RC[24] = \
 #define rol(x, s) (((x) << s) | ((x) >> (64 - s)))
 #define REPEAT6(e) e e e e e e
 #define REPEAT24(e) REPEAT6(e e e e)
+#define REPEAT23(e) REPEAT6(e e e) e e e e e
 #define REPEAT5(e) e e e e e
 #define FOR5(v, s, e) \
   v = 0;            \
@@ -47,35 +48,37 @@ __device__ static const uint64_t RC[24] = \
 __device__ static inline void keccakf(void* state) {
   uint64_t* a = (uint64_t*)state;
   uint64_t b[5] = {0};
-  uint64_t t = 0;
+  uint64_t t = 0, v = 0;
   uint8_t x, y;
 
-  #if __CUDA_ARCH__ > 700
-  #pragma unroll 6
-  #endif
   for (int i = 0; i < 24; i++) {
     // Theta
-    FOR5(x, 1,
-         b[x] = 0;
-         FOR5(y, 5,
-              b[x] ^= a[x + y]; ))
-    FOR5(x, 1,
-         FOR5(y, 5,
-              a[y + x] ^= b[(x + 4) % 5] ^ rol(b[(x + 1) % 5], 1); ))
+    FOR5(x, 1, b[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20];)
+
+    v = b[4]; t = b[0];
+    b[4] ^= rol(b[1], 1);
+    b[0] ^= rol(b[2], 1);
+    b[1] ^= rol(b[3], 1);
+    b[2] ^= rol(v, 1);
+    b[3] ^= rol(t, 1);
+
+    FOR5(x, 1, FOR5(y, 5, a[y + x] ^= b[(x + 4) % 5]; ))
+
     // Rho and pi
-    t = a[1];
-    x = 0;
-    REPEAT24(b[0] = a[pi[x]];
-             a[pi[x]] = rol(t, rho[x]);
-             t = b[0];
-             x++; )
+    t = a[1]; x = 23;
+    REPEAT23(a[pi[x]] = rol(a[pi[x-1]], rho[x]); x--; )
+             a[pi[0]] = rol(         t, rho[0]);
+
     // Chi
-    FOR5(y,
-       5,
-       FOR5(x, 1,
-            b[x] = a[y + x];)
-       FOR5(x, 1,
-            a[y + x] = b[x] ^ ((~b[(x + 1) % 5]) & b[(x + 2) % 5]); ))
+    FOR5(y, 5, 
+      v = a[y]; t = a[y+1];
+      a[  y] ^= ~a[y+1] & a[y+2];
+      a[y+1] ^= ~a[y+2] & a[y+3];
+      a[y+2] ^= ~a[y+3] & a[y+4];
+      a[y+3] ^= ~a[y+4] & v;
+      a[y+4] ^= ~v      & t;
+    )
+
     // Iota
     a[0] ^= RC[i];
   }
