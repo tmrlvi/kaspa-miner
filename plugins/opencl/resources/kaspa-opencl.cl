@@ -52,7 +52,7 @@ constant STATIC const uint64_t RC[24] = \
 #if defined(OPENCL_PLATFORM_AMD)
 #pragma OPENCL EXTENSION cl_amd_media_ops : enable
 #define dataType uint2
-#define as_dateType as_uint2
+#define as_dataType as_uint2
 static inline uint2 rol(const uint2 vv, const int r)
 {
 	if (r <= 32)
