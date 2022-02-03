@@ -25,7 +25,7 @@ pub struct OpenCLOpt {
     pub opencl_platform: Option<u16>,
     #[clap(long = "opencl-device", use_delimiter = true, help = "Which OpenCL GPUs to use on a specific platform")]
     pub opencl_device: Option<Vec<u16>>,
-    #[clap(long = "opencl-workload", help = "Ratio of nonces to GPU possible parrallel run in OpenCL [defualt: 512]")]
+    #[clap(long = "opencl-workload", help = "Ratio of nonces to GPU possible parrallel run in OpenCL [default: 512]")]
     pub opencl_workload: Option<Vec<f32>>,
     #[clap(
         long = "opencl-workload-absolute",
@@ -44,7 +44,7 @@ pub struct OpenCLOpt {
     #[clap(
         long = "nonce-gen",
         help = "The random method used to generate nonces. Options: (i) xoshiro - each thread in GPU will have its own random state, creating a (pseudo-)independent xoshiro sequence (ii) lean - each GPU will have a single random nonce, and each GPU thread will work on nonce + thread id.",
-        default_value = "xoshiro"
+        default_value = "lean"
     )]
     pub nonce_gen: NonceGenEnum,
 }
