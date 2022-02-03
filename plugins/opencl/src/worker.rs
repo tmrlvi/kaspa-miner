@@ -386,16 +386,6 @@ fn from_source(context: &Context, device: &Device, options: &str) -> Result<Prog
         Err(_) => String::new(),
     };
 
-    compile_options += &match device.gfxip_major_amd() {
-        Ok(major) => format!("-D __GFXIP_MAJOR__={} ", major),
-        Err(_) => String::new(),
-    };
-
-    compile_options += &match device.gfxip_minor_amd() {
-        Ok(minor) => format!("-D __GFXIP_MINOR__={} ", minor),
-        Err(_) => String::new(),
-    };
-
     // Hack to recreate the AMD flags
     compile_options += &match device.pcie_id_amd() {
         Ok(_) => {
