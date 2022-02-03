@@ -15,7 +15,7 @@ mod worker;
 use crate::cli::CudaOpt;
 use crate::worker::CudaGPUWorker;
 
-const DEFAULT_WORKLOAD_SCALE: f32 = 16.;
+const DEFAULT_WORKLOAD_SCALE: f32 = 64.;
 
 pub struct CudaPlugin {
     specs: Vec<CudaWorkerSpec>,
