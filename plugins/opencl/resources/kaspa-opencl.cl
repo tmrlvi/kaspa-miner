@@ -283,12 +283,29 @@ void STATIC inline _amul4bit(__constant uint32_t packed_vec1[32], uint32_t packe
 #define amul4bit(X,Y,Z) _amul4bit((constant uchar4*)(X), (private uchar4*)(Y), (uint32_t *)(Z))
 void STATIC inline _amul4bit(__constant uchar4 packed_vec1[32], uchar4 packed_vec2[32], uint32_t *ret) {
     // We assume each 32 bits have four values: A0 B0 C0 D0
+#if __FORCE_AMD_V_DOT8_U32_U4__ == 1
+    uint32_t res = 0;
+    __constant uchar4 *a4 = packed_vec1;
+    uchar4 *b4 = packed_vec2;
+    for (int i=0; i<8; i++) {
+        res += ((a4[i].x>>0)&0xf)*((b4[i].x>>0)&0xf);
+        res += ((a4[i].x>>4)&0xf)*((b4[i].x>>4)&0xf);
+        res += ((a4[i].y>>0)&0xf)*((b4[i].y>>0)&0xf);
+        res += ((a4[i].y>>4)&0xf)*((b4[i].y>>4)&0xf);
+        res += ((a4[i].z>>0)&0xf)*((b4[i].z>>0)&0xf);
+        res += ((a4[i].z>>4)&0xf)*((b4[i].z>>4)&0xf);
+        res += ((a4[i].w>>0)&0xf)*((b4[i].w>>0)&0xf);
+        res += ((a4[i].w>>4)&0xf)*((b4[i].w>>4)&0xf);
+    }
+    *ret = res;
+#else
     ushort4 res = 0;
     for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
         res += convert_ushort4(packed_vec1[i])*convert_ushort4(packed_vec2[i]);
     }
     res.s01 = res.s01 + res.s23;
     *ret = res.s0 + res.s1;
+#endif
 }
 #endif
 #define SWAP4( x ) as_uint( as_uchar4( x ).wzyx )
@@ -314,7 +331,7 @@ kernel void heavy_hash(
     switch (random_type){
       case RANDOM_TYPE_LEAN:
         // nonce = ((uint64_t *)random_state)[0] + nonceId;
-        nonce = (((__global uint64_t *)random_state)[0]& 0xFFFFFFFF) ^ ((ulong)SWAP4(nonceId) << 32);
+        nonce = (((__global uint64_t *)random_state)[0]) ^ ((ulong)SWAP4(nonceId) << 32);
         break;
       case RANDOM_TYPE_XOSHIRO:
       default:
