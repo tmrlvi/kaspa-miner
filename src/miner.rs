@@ -1,3 +1,4 @@
+use futures::executor::ThreadPool;
 use std::num::Wrapping;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -30,6 +31,7 @@ pub struct MinerManager {
     is_synced: bool,
     hashes_tried: Arc<AtomicU64>,
     current_state_id: AtomicUsize,
+    pool: ThreadPool,
 }
 
 impl Drop for MinerManager {
@@ -46,7 +48,7 @@ impl Drop for MinerManager {
             info!("Waiting on handle...");
             match handle.join() {
                 Ok(_) => {}
-                Err(e) => panic!("Change failed to close gracefully: {:?}", e),
+                Err(e) => panic!("Channel failed to close gracefully: {:?}", e),
             };
             info!("Handle closed. {} left.", self.handles.len());
         }
@@ -66,15 +68,22 @@ impl MinerManager {
     pub fn new(send_channel: Sender<BlockSeed>, n_cpus: Option<u16>, manager: &PluginManager) -> Self {
         let hashes_tried = Arc::new(AtomicU64::new(0));
         let (send, recv) = watch::channel(None);
-        let mut handles =
-            Self::launch_cpu_threads(send_channel.clone(), Arc::clone(&hashes_tried), recv.clone(), n_cpus)
-                .collect::<Vec<MinerHandler>>();
+        let pool = ThreadPool::new().expect("We should be able to create a pool");
+        let mut handles = Self::launch_cpu_threads(
+            send_channel.clone(),
+            Arc::clone(&hashes_tried),
+            recv.clone(),
+            n_cpus,
+            pool.clone(),
+        )
+        .collect::<Vec<MinerHandler>>();
         if manager.has_specs() {
             handles.append(&mut Self::launch_gpu_threads(
                 send_channel.clone(),
                 Arc::clone(&hashes_tried),
                 recv,
                 manager,
+                pool.clone(),
             ));
         }
         Self {
@@ -85,6 +94,7 @@ impl MinerManager {
             is_synced: true,
             hashes_tried,
             current_state_id: AtomicUsize::new(0),
+            pool,
         }
     }
 
@@ -93,11 +103,13 @@ impl MinerManager {
         hashes_tried: Arc<AtomicU64>,
         work_channel: watch::Receiver<Option<WorkerCommand>>,
         n_cpus: Option<u16>,
+        pool: ThreadPool,
     ) -> impl Iterator<Item = MinerHandler> {
         let n_cpus = get_num_cpus(n_cpus);
         info!("launching: {} cpu miners", n_cpus);
-        (0..n_cpus)
-            .map(move |_| Self::launch_cpu_miner(send_channel.clone(), work_channel.clone(), Arc::clone(&hashes_tried)))
+        (0..n_cpus).map(move |_| {
+            Self::launch_cpu_miner(send_channel.clone(), work_channel.clone(), Arc::clone(&hashes_tried), pool.clone())
+        })
     }
 
     fn launch_gpu_threads(
@@ -105,6 +117,7 @@ impl MinerManager {
         hashes_tried: Arc<AtomicU64>,
         work_channel: watch::Receiver<Option<WorkerCommand>>,
         manager: &PluginManager,
+        pool: ThreadPool,
     ) -> Vec<MinerHandler> {
         let mut vec = Vec::<MinerHandler>::new();
         let specs = manager.build().unwrap();
@@ -114,6 +127,7 @@ impl MinerManager {
                 work_channel.clone(),
                 Arc::clone(&hashes_tried),
                 spec,
+                pool.clone(),
             ));
         }
         vec
@@ -146,6 +160,7 @@ impl MinerManager {
         mut block_channel: watch::Receiver<Option<WorkerCommand>>,
         hashes_tried: Arc<AtomicU64>,
         spec: Box<dyn WorkerSpec>,
+        pool: ThreadPool,
     ) -> MinerHandler {
         std::thread::spawn(move || {
             let mut box_ = spec.build();
@@ -187,10 +202,14 @@ impl MinerManager {
                     gpu_work.copy_output_to(&mut nonces)?;
                     if nonces[0] != 0 {
                         if let Some(block_seed) = state_ref.generate_block_if_pow(nonces[0]) {
-                            match send_channel.blocking_send(block_seed.clone()) {
-                                Ok(()) => block_seed.report_block(),
-                                Err(e) => error!("Failed submitting block: ({})", e.to_string()),
-                            };
+                            let channel = send_channel.clone();
+                            let seed= block_seed.clone();
+                            pool.spawn_ok(async move {
+                                match channel.send(seed.clone()).await {
+                                    Ok(()) => seed.report_block(),
+                                    Err(e) => error!("Failed submitting block: ({})", e.to_string()),
+                                };
+                            });
                             if let BlockSeed::FullBlock(_) = block_seed {
                                 state = None;
                             }
@@ -263,6 +282,7 @@ impl MinerManager {
         send_channel: Sender<BlockSeed>,
         mut block_channel: watch::Receiver<Option<WorkerCommand>>,
         hashes_tried: Arc<AtomicU64>,
+        pool: ThreadPool,
     ) -> MinerHandler {
         let mut nonce = Wrapping(thread_rng().next_u64());
         let mut mask = Wrapping(0);
@@ -298,10 +318,14 @@ impl MinerManager {
                     nonce = (nonce & mask) | fixed;
 
                     if let Some(block_seed) = state_ref.generate_block_if_pow(nonce.0) {
-                        match send_channel.blocking_send(block_seed.clone()) {
-                            Ok(()) => block_seed.report_block(),
-                            Err(e) => error!("Failed submitting block: ({})", e.to_string()),
-                        };
+                        let channel = send_channel.clone();
+                        let seed = block_seed.clone();
+                        pool.spawn_ok(async move {
+                            match channel.send(seed.clone()).await {
+                                Ok(()) => seed.report_block(),
+                                Err(e) => error!("Failed submitting block: ({})", e.to_string()),
+                            };
+                        });
                         if let BlockSeed::FullBlock(_) = block_seed {
                             state = None;
                         }
