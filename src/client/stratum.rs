@@ -28,11 +28,13 @@ use tokio::task;
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::sync::PollSender;
+use tokio_util::sync::{PollSendError, PollSender};
 
 //const DIFFICULTY_1_TARGET: Uint256 = Uint256([0x00000000ffff0000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000]);
 const DIFFICULTY_1_TARGET: (u64, i16) = (0xffffu64, 208); // 0xffff 2^208
 const LOG_RATE: Duration = Duration::from_secs(30);
+
+type BlockHandle = JoinHandle<Result<(), PollSendError<StratumLine>>>;
 
 #[derive(Default)]
 pub struct ShareStats {
@@ -93,6 +95,8 @@ pub struct StratumHandler {
     last_stratum_id: Arc<AtomicU32>,
 
     shares_stats: Arc<ShareStats>,
+    block_channel: Sender<BlockSeed>,
+    block_handle: BlockHandle,
 }
 
 #[async_trait(?Send)]
@@ -156,39 +160,8 @@ impl Client for StratumHandler {
         }
     }
 
-    fn get_send_channel(&self) -> Sender<BlockSeed> {
-        let (send, recv) = mpsc::channel::<BlockSeed>(1);
-        let forwarding = self.send_channel.clone();
-        let address = self.miner_address.clone();
-        let stratum_id = self.last_stratum_id.clone();
-
-        let share_stats = self.shares_stats.clone();
-        tokio::spawn(async move {
-            ReceiverStream::new(recv)
-                .map(move |block_seed| {
-                    let (nonce, id) = match block_seed {
-                        BlockSeed::PartialBlock { ref nonce, ref id, .. } => (nonce, id),
-                        BlockSeed::FullBlock(_) => unreachable!(),
-                    };
-                    let msg_id = stratum_id.fetch_add(1, Ordering::SeqCst);
-                    {
-                        share_stats.shares_pending.try_lock().unwrap().insert(
-                            msg_id,
-                            //SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
-                            id.clone(), //block_seed.clone()
-                        );
-                    }
-                    StratumLine::StratumCommand(StratumCommand::MiningSubmit(MiningSubmit::MiningSubmitShort {
-                        id: msg_id,
-                        params: (address.clone(), id.into(), format!("{:#08x}", nonce)),
-                        error: None,
-                    }))
-                })
-                .map(Ok)
-                .forward(PollSender::new(forwarding))
-                .await
-        });
-        send
+    fn get_block_channel(&self) -> Sender<BlockSeed> {
+        self.block_channel.clone()
     }
 }
 
@@ -213,6 +186,13 @@ impl StratumHandler {
             }
             SHARE_STATS.clone().unwrap()
         };
+        let last_stratum_id = Arc::new(AtomicU32::new(0));
+        let (block_channel, block_handle) = Self::create_block_channel(
+            send_channel.clone(),
+            miner_address.clone(),
+            last_stratum_id.clone(),
+            share_state.clone(),
+        );
         Ok(Box::new(Self {
             log_handler: task::spawn(Self::log_shares(share_state.clone())),
             stream: Box::pin(stream),
@@ -228,10 +208,48 @@ impl StratumHandler {
             nonce_mask: 0,
             nonce_fixed: 0,
             extranonce: None,
-            last_stratum_id: Arc::new(AtomicU32::new(0)),
+            last_stratum_id,
             shares_stats: share_state,
             mining_dev: None,
+            block_channel,
+            block_handle,
         }))
+    }
+
+    fn create_block_channel(
+        send_channel: Sender<StratumLine>,
+        miner_address: String,
+        last_stratum_id: Arc<AtomicU32>,
+        share_stats: Arc<ShareStats>,
+    ) -> (Sender<BlockSeed>, BlockHandle) {
+        let (send, recv) = mpsc::channel::<BlockSeed>(1);
+
+        let handle = tokio::spawn(async move {
+            ReceiverStream::new(recv)
+                .map(move |block_seed| {
+                    let (nonce, id) = match block_seed {
+                        BlockSeed::PartialBlock { ref nonce, ref id, .. } => (nonce, id),
+                        BlockSeed::FullBlock(_) => unreachable!(),
+                    };
+                    let msg_id = last_stratum_id.fetch_add(1, Ordering::SeqCst);
+                    {
+                        share_stats.shares_pending.try_lock().unwrap().insert(
+                            msg_id,
+                            //SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+                            id.clone(), //block_seed.clone()
+                        );
+                    }
+                    StratumLine::StratumCommand(StratumCommand::MiningSubmit(MiningSubmit::MiningSubmitShort {
+                        id: msg_id,
+                        params: (miner_address.clone(), id.into(), format!("{:#08x}", nonce)),
+                        error: None,
+                    }))
+                })
+                .map(Ok)
+                .forward(PollSender::new(send_channel))
+                .await
+        });
+        (send, handle)
     }
 
     async fn handle_message(&mut self, msg: StratumLine, miner: &mut MinerManager) -> Result<(), Error> {
@@ -364,5 +382,6 @@ impl StratumHandler {
 impl Drop for StratumHandler {
     fn drop(&mut self) {
         self.log_handler.abort();
+        self.block_handle.abort()
     }
 }

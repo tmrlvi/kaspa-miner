@@ -102,7 +102,7 @@ async fn client_main(
         client.add_devfund(opt.devfund_address.clone(), opt.devfund_percent);
     }
     client.register().await?;
-    let mut miner_manager = MinerManager::new(client.get_send_channel(), opt.num_threads, plugin_manager);
+    let mut miner_manager = MinerManager::new(client.get_block_channel(), opt.num_threads, plugin_manager);
     client.listen(&mut miner_manager).await?;
     drop(client); // Closing client first, so only the close command will get to the miners
     drop(miner_manager);

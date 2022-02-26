@@ -14,9 +14,12 @@ use rand::{thread_rng, RngCore};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, error::SendError, Sender};
+use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::sync::PollSender;
+use tokio_util::sync::{PollSendError, PollSender};
 use tonic::{transport::Channel as TonicChannel, Streaming};
+
+type BlockHandle = JoinHandle<Result<(), PollSendError<KaspadMessage>>>;
 
 #[allow(dead_code)]
 pub struct KaspadHandler {
@@ -28,6 +31,9 @@ pub struct KaspadHandler {
     devfund_address: Option<String>,
     devfund_percent: u16,
     block_template_ctr: Arc<AtomicU16>,
+
+    block_channel: Sender<BlockSeed>,
+    block_handle: BlockHandle,
 }
 
 #[async_trait(?Send)]
@@ -53,21 +59,8 @@ impl Client for KaspadHandler {
         Ok(())
     }
 
-    fn get_send_channel(&self) -> Sender<BlockSeed> {
-        // KaspadMessage::submit_block(block)
-        let (send, recv) = mpsc::channel::<BlockSeed>(1);
-        let forwarding = self.send_channel.clone();
-        tokio::spawn(async move {
-            ReceiverStream::new(recv)
-                .map(|block_seed| match block_seed {
-                    FullBlock(block) => KaspadMessage::submit_block(block),
-                    PartialBlock { .. } => unreachable!("All blocks sent here should have arrived from here"),
-                })
-                .map(Ok)
-                .forward(PollSender::new(forwarding))
-                .await
-        });
-        send
+    fn get_block_channel(&self) -> Sender<BlockSeed> {
+        self.block_channel.clone()
     }
 }
 
@@ -87,6 +80,7 @@ impl KaspadHandler {
         send_channel.send(GetInfoRequestMessage {}.into()).await?;
         send_channel.send(GetBlockTemplateRequestMessage { pay_address: miner_address.clone() }.into()).await?;
         let stream = client.message_stream(ReceiverStream::new(recv)).await?.into_inner();
+        let (block_channel, block_handle) = Self::create_block_channel(send_channel.clone());
         Ok(Box::new(Self {
             client,
             stream,
@@ -97,7 +91,27 @@ impl KaspadHandler {
             devfund_percent: 0,
             block_template_ctr: block_template_ctr
                 .unwrap_or_else(|| Arc::new(AtomicU16::new((thread_rng().next_u64() % 10_000u64) as u16))),
+            block_channel,
+            block_handle,
         }))
+    }
+
+    fn create_block_channel(send_channel: Sender<KaspadMessage>) -> (Sender<BlockSeed>, BlockHandle) {
+        // KaspadMessage::submit_block(block)
+        let (send, recv) = mpsc::channel::<BlockSeed>(1);
+        (
+            send,
+            tokio::spawn(async move {
+                ReceiverStream::new(recv)
+                    .map(|block_seed| match block_seed {
+                        FullBlock(block) => KaspadMessage::submit_block(block),
+                        PartialBlock { .. } => unreachable!("All blocks sent here should have arrived from here"),
+                    })
+                    .map(Ok)
+                    .forward(PollSender::new(send_channel))
+                    .await
+            }),
+        )
     }
 
     async fn client_send(&self, msg: impl Into<KaspadMessage>) -> Result<(), SendError<KaspadMessage>> {
@@ -144,5 +158,11 @@ impl KaspadHandler {
             msg => info!("got unknown msg: {:?}", msg),
         }
         Ok(())
+    }
+}
+
+impl Drop for KaspadHandler {
+    fn drop(&mut self) {
+        self.block_handle.abort();
     }
 }
