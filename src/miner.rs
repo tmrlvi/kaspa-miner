@@ -43,10 +43,12 @@ impl Drop for MinerManager {
         info!("Waiting for threads to close");
         while !self.handles.is_empty() {
             let handle = self.handles.pop().expect("There should be at least one");
+            info!("Waiting on handle...");
             match handle.join() {
                 Ok(_) => {}
                 Err(e) => panic!("Change failed to close gracefully: {:?}", e),
             };
+            info!("Handle closed. {} left.", self.handles.len());
         }
         info!("Miner closed!");
     }
