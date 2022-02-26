@@ -40,6 +40,7 @@ impl Drop for MinerManager {
             Ok(_) => {}
             Err(_) => warn!("All workers are already dead"),
         }
+        info!("Waiting for threads to close");
         while !self.handles.is_empty() {
             let handle = self.handles.pop().expect("There should be at least one");
             match handle.join() {
@@ -47,6 +48,7 @@ impl Drop for MinerManager {
                 Err(e) => panic!("Change failed to close gracefully: {:?}", e),
             };
         }
+        info!("Miner closed!");
     }
 }
 
@@ -158,7 +160,10 @@ impl MinerManager {
                         state = match block_channel.wait_for_change() {
                             Ok(cmd) => match cmd {
                                 Some(WorkerCommand::Job(s)) => Some(s),
-                                Some(WorkerCommand::Close) => {return Ok(());}
+                                Some(WorkerCommand::Close) => {
+                                    info!("Closing thread for GPU {}", gpu_work.id());
+                                    return Ok(());
+                                }
                                 None => None,
                             },
                             Err(e) => {
@@ -233,7 +238,10 @@ impl MinerManager {
                         if let Some(new_cmd) = block_channel.get_changed()? {
                             state = match new_cmd {
                                 Some(WorkerCommand::Job(s)) => Some(s),
-                                Some(WorkerCommand::Close) => {return Ok(());}
+                                Some(WorkerCommand::Close) => {
+                                    info!("Closing thread for GPU {}", gpu_work.id());
+                                    return Ok(());
+                                }
                                 None => None,
                             };
                         }
