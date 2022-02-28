@@ -60,8 +60,8 @@ impl Plugin for CudaPlugin {
             }
         };
 
-        // if any of cuda_lock_core_clocks / cuda_lock_mem_clocks is valid, init nvml and try to apply
-        if opts.cuda_lock_core_clocks.is_some() || opts.cuda_lock_mem_clocks.is_some() {
+        // if any of cuda_lock_core_clocks / cuda_lock_mem_clocks / cuda_power_limit is valid, init nvml and try to apply
+        if opts.cuda_lock_core_clocks.is_some() || opts.cuda_lock_mem_clocks.is_some() || opts.cuda_power_limits.is_some(){
             let nvml = Nvml::init()?;
 
             for i in 0..gpus.len() {
@@ -77,22 +77,35 @@ impl Plugin for CudaPlugin {
                     _ => None,
                 };
 
+                let power_limit: Option<u32> = match &opts.cuda_power_limits {
+                    Some(power_limits) if i < power_limits.len() => Some(power_limits[i]),
+                    Some(power_limits) if !power_limits.is_empty() => Some(*power_limits.last().unwrap()),
+                    _ => None,
+                };
+
                 let mut nvml_device: NvmlDevice = nvml.device_by_index(gpus[i] as u32)?;
 
                 if lock_mem_clock.is_some() {
                     let lmc = lock_mem_clock.unwrap();
                     match nvml_device.set_mem_locked_clocks(lmc, lmc) {
-                        Err(e) => error!("{:?}", e),
-                        _ => info!("GPU #{} #{} lock mem clock at #{}", i, &nvml_device.name()?, &lmc),
+                        Err(e) => error!("set mem locked clocks {:?}", e),
+                        _ => info!("GPU #{} #{} lock mem clock at {} Mhz", i, &nvml_device.name()?, &lmc),
                     };
-
                 }
 
                 if lock_core_clock.is_some() {
                     let lcc = lock_core_clock.unwrap();
                     match nvml_device.set_gpu_locked_clocks(lcc, lcc) {
-                        Err(e) => error!("{:?}", e),
-                        _ => info!("GPU #{} #{} lock core clock at #{}", i, &nvml_device.name()?, &lcc),
+                        Err(e) => error!("set gpu locked clocks {:?}", e),
+                        _ => info!("GPU #{} #{} lock core clock at {} Mhz", i, &nvml_device.name()?, &lcc),
+                    };
+                };
+
+                if power_limit.is_some() {
+                    let pl = power_limit.unwrap();
+                    match nvml_device.set_power_management_limit(pl * 1000) {
+                        Err(e) => error!("set power limit {:?}", e),
+                        _ => info!("GPU #{} #{} power limit at {} W", i, &nvml_device.name()?, &pl),
                     };
                 };
             }
