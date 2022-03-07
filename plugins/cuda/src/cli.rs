@@ -16,4 +16,11 @@ pub struct CudaOpt {
         help = "Actively wait for GPU result. Increases CPU usage, but removes delays that might result in red blocks. Can have lower workload."
     )]
     pub cuda_no_blocking_sync: bool,
+    #[clap(long = "cuda-lock-mem-clocks", use_delimiter = true, help = "Lock mem clocks eg: ,810, [default: 0]")]
+    pub cuda_lock_mem_clocks: Option<Vec<u32>>,
+    #[clap(long = "cuda-lock-core-clocks", use_delimiter = true, help = "Lock core clocks eg: ,1200, [default: 0]")]
+    pub cuda_lock_core_clocks: Option<Vec<u32>>,
+    #[clap(long = "cuda-power-limits", use_delimiter = true, help = "Lock power limits eg: ,150, [default: 0]")]
+    pub cuda_power_limits: Option<Vec<u32>>,
+     
 }

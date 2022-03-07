@@ -56,8 +56,14 @@ OPTIONS:
     -a, --mining-address <MINING_ADDRESS>      The Kaspa address for the miner reward
         --cuda-device <CUDA_DEVICE>            Which CUDA GPUs to use [default: all]
         --cuda-disable                         Disable cuda workers
+        --cuda-lock-core-clocks <CUDA_LOCK_CORE_CLOCKS>
+                                               Lock core clocks eg: ,1200, [default: 0]
+        --cuda-lock-mem-clocks <CUDA_LOCK_MEM_CLOCKS>
+                                               Lock mem clocks eg: ,810, [default: 0]
         --cuda-no-blocking-sync                Actively wait for GPU result. Increases CPU usage, but removes delays
                                                that might result in red blocks. Can have lower workload.
+        --cuda-power-limits <CUDA_POWER_LIMITS>
+                                               Lock power limits eg: ,150, [default: 0
         --cuda-workload <CUDA_WORKLOAD>        Ratio of nonces to GPU possible parrallel run [default: 64]
         --cuda-workload-absolute               The values given by workload are not ratio, but absolute number of nonces
                                                [default: false]
