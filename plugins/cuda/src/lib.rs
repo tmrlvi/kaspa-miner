@@ -1,3 +1,4 @@
+#![feature(once_cell)]
 #[macro_use]
 extern crate kaspa_miner;
 
@@ -9,6 +10,7 @@ use kaspa_miner::{Plugin, Worker, WorkerSpec};
 use log::LevelFilter;
 use log::{error, info};
 use std::error::Error as StdError;
+use std::lazy::SyncOnceCell;
 
 pub type Error = Box<dyn StdError + Send + Sync + 'static>;
 
@@ -19,6 +21,7 @@ use crate::cli::CudaOpt;
 use crate::worker::CudaGPUWorker;
 
 const DEFAULT_WORKLOAD_SCALE: f32 = 256.;
+static NVML_INSTANCE: SyncOnceCell<Nvml> = SyncOnceCell::new();
 
 pub struct CudaPlugin {
     specs: Vec<CudaWorkerSpec>,
@@ -62,7 +65,7 @@ impl Plugin for CudaPlugin {
 
         // if any of cuda_lock_core_clocks / cuda_lock_mem_clocks / cuda_power_limit is valid, init nvml and try to apply
         if opts.cuda_lock_core_clocks.is_some() || opts.cuda_lock_mem_clocks.is_some() || opts.cuda_power_limits.is_some(){
-            let nvml = Nvml::init()?;
+            NVML_INSTANCE.get_or_init(|| Nvml::init().unwrap());
 
             for i in 0..gpus.len() {
                 let lock_mem_clock: Option<u32> = match &opts.cuda_lock_mem_clocks {
@@ -83,7 +86,7 @@ impl Plugin for CudaPlugin {
                     _ => None,
                 };
 
-                let mut nvml_device: NvmlDevice = nvml.device_by_index(gpus[i] as u32)?;
+                let mut nvml_device: NvmlDevice = NVML_INSTANCE.get().unwrap().device_by_index(gpus[i] as u32)?;
 
                 if lock_mem_clock.is_some() {
                     let lmc = lock_mem_clock.unwrap();
