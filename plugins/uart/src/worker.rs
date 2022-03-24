@@ -18,7 +18,7 @@ impl Worker for UartWorker{
     }
 
     fn load_block_constants(&mut self, hash_header: &[u8; 72], _matrix: &[[u16; 64]; 64], _target: &[u64; 4]) {
-        if let Err(err) = self.port.write_all(&hash_header[..40]) {
+        if let Err(err) = self.port.write_all(hash_header.as_slice()) {
             panic!("Could not write: {:?}", err);
         };
         if let Err(err) = self.port.flush() {
