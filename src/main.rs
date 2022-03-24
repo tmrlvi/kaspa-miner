@@ -30,7 +30,7 @@ mod pow;
 mod target;
 mod watch;
 
-const WHITELIST: [&str; 4] = ["libkaspacuda", "libkaspaopencl", "kaspacuda", "kaspaopencl"];
+const WHITELIST: [&str; 6] = ["libkaspacuda", "libkaspaopencl", "libkaspauart", "kaspacuda", "kaspaopencl", "kaspauart"];
 
 pub mod proto {
     tonic::include_proto!("protowire");

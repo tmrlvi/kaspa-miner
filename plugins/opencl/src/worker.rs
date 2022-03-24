@@ -148,6 +148,10 @@ impl Worker for OpenCLGPUWorker {
             .unwrap();
         Ok(())
     }
+
+    fn requires_filter(&self) -> bool {
+        false
+    }
 }
 
 impl OpenCLGPUWorker {

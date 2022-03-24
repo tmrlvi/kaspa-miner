@@ -1,0 +1,17 @@
+[package]
+name = "kaspauart"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+kaspa_miner = {path = "../../", package="kaspa-miner"}
+clap = { version = "3.0", features = ["color", "derive"]}
+log = "0.4"
+env_logger = "0.9"
+serialport = "4.0"
+
+
+[lib]
+crate-type = ["cdylib", "rlib"]

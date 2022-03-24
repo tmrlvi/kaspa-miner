@@ -221,7 +221,11 @@ impl MinerManager {
             let gpu_work = box_.as_mut();
             (|| {
                 info!("Spawned Thread for GPU {}", gpu_work.id());
-                let mut nonces = vec![0u64; 1];
+                let return_size = match gpu_work.requires_filter() {
+                    true => gpu_work.get_workload(),
+                    false => 1usize
+                };
+                let mut nonces = vec![0u64; return_size];
 
                 let mut state = None;
 
@@ -251,25 +255,48 @@ impl MinerManager {
                     gpu_work.sync().unwrap();
 
                     gpu_work.copy_output_to(&mut nonces)?;
-                    if nonces[0] != 0 {
-                        if let Some(block_seed) = state_ref.generate_block_if_pow(nonces[0]) {
-                            match send_channel.blocking_send(block_seed.clone()) {
-                                Ok(()) => block_seed.report_block(),
-                                Err(e) => error!("Failed submitting block: ({})", e.to_string()),
-                            };
-                            if let BlockSeed::FullBlock(_) = block_seed {
-                                state = None;
+                    match gpu_work.requires_filter() {
+                        false => {
+                            if nonces[0] != 0 {
+                                if let Some(block_seed) = state_ref.generate_block_if_pow(nonces[0]) {
+                                    match send_channel.blocking_send(block_seed.clone()) {
+                                        Ok(()) => block_seed.report_block(),
+                                        Err(e) => error!("Failed submitting block: ({})", e.to_string()),
+                                    };
+                                    if let BlockSeed::FullBlock(_) = block_seed {
+                                        state = None;
+                                    }
+                                    nonces[0] = 0;
+                                    hashes_tried.fetch_add(gpu_work.get_workload().try_into().unwrap(), Ordering::AcqRel);
+                                    continue;
+                                } else {
+                                    let hash = state_ref.calculate_pow(nonces[0]);
+                                    warn!("Something is wrong in GPU results! Got nonce {}, with hash real {:?}  (target: {}*2^196)", nonces[0], hash.0, state_ref.target.0[3]);
+                                    break;
+                                }
                             }
-                            nonces[0] = 0;
-                            hashes_tried.fetch_add(gpu_work.get_workload().try_into().unwrap(), Ordering::AcqRel);
-                            continue;
-                        } else {
-                            let hash = state_ref.calculate_pow(nonces[0]);
-                            warn!("Something is wrong in GPU results! Got nonce {}, with hash real {:?}  (target: {}*2^196)", nonces[0], hash.0, state_ref.target.0[3]);
-                            break;
+                        },
+                        true => {
+                            let mut found = false;
+                            for nonce in &nonces {
+                                if let Some(block_seed) = state_ref.generate_block_if_pow(*nonce) {
+                                    match send_channel.blocking_send(block_seed.clone()) {
+                                        Ok(()) => block_seed.report_block(),
+                                        Err(e) => error!("Failed submitting block: ({})", e.to_string()),
+                                    };
+                                    if let BlockSeed::FullBlock(_) = block_seed {
+                                        state = None;
+                                    }
+                                    hashes_tried.fetch_add(gpu_work.get_workload().try_into().unwrap(), Ordering::AcqRel);
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if found {
+                                continue;
+                            }
                         }
                     }
-
                         /*
                         info!("Output should be: {:02X?}", state_ref.calculate_pow(nonces[0]).to_le_bytes());
                         info!("We got: {:02X?} (Nonces: {:02X?})", hashes[0], nonces[0].to_le_bytes());

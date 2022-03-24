@@ -117,6 +117,10 @@ impl<'gpu> Worker for CudaGPUWorker<'gpu> {
         self.final_nonce_buff.copy_to(nonces)?;
         Ok(())
     }
+
+    fn requires_filter(&self) -> bool {
+        false
+    }
 }
 
 impl<'gpu> CudaGPUWorker<'gpu> {
