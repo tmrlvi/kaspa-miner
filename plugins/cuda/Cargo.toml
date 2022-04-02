@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 kaspa-miner = {path = "../../"}
-cust ="0.3"
+cust ="0.2"
 log = "0.4"
 rand = "0.8"
 clap = { version = "3.0", features = ["color", "derive"]}
