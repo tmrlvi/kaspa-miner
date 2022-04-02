@@ -1,6 +1,6 @@
 [package]
 name = "kaspa-miner"
-version = "0.2.1-GPU-0.5"
+version = "0.2.1-GPU-0.5-rc1"
 edition = "2021"
 license = "MIT/Apache-2.0"
 authors = ["Elichai <elichai.turkel@gmail.com>"]
