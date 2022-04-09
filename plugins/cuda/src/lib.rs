@@ -6,8 +6,8 @@ use cust::prelude::*;
 use kaspa_miner::{Plugin, Worker, WorkerSpec};
 use log::LevelFilter;
 use log::{error, info};
-use nvml_wrapper::Device as NvmlDevice;
-use nvml_wrapper::Nvml;
+//use nvml_wrapper::Device as NvmlDevice;
+//use nvml_wrapper::Nvml;
 use std::error::Error as StdError;
 
 pub type Error = Box<dyn StdError + Send + Sync + 'static>;
@@ -22,7 +22,7 @@ const DEFAULT_WORKLOAD_SCALE: f32 = 256.;
 
 pub struct CudaPlugin {
     specs: Vec<CudaWorkerSpec>,
-    nvml_instance: Nvml,
+    //nvml_instance: Nvml,
     _enabled: bool,
 }
 
@@ -30,8 +30,8 @@ impl CudaPlugin {
     fn new() -> Result<Self, Error> {
         cust::init(CudaFlags::empty())?;
         env_logger::builder().filter_level(LevelFilter::Info).parse_default_env().init();
-        let nvml_instance = Nvml::init()?;
-        Ok(Self { specs: Vec::new(), _enabled: false, nvml_instance })
+        //let nvml_instance = Nvml::init()?;
+        Ok(Self { specs: Vec::new(), _enabled: false/*, nvml_instance*/ })
     }
 }
 
@@ -62,6 +62,7 @@ impl Plugin for CudaPlugin {
             }
         };
 
+        /*
         // if any of cuda_lock_core_clocks / cuda_lock_mem_clocks / cuda_power_limit is valid, init nvml and try to apply
         if opts.cuda_lock_core_clocks.is_some()
             || opts.cuda_lock_mem_clocks.is_some()
@@ -109,7 +110,7 @@ impl Plugin for CudaPlugin {
                     };
                 };
             }
-        }
+        }*/
 
         self.specs = (0..gpus.len())
             .map(|i| CudaWorkerSpec {
