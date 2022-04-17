@@ -1,4 +1,4 @@
-use crate::{Error, NonceGenEnum};
+use crate::{CudaWorkerSpec, Error, NonceGenEnum};
 use cust::context::CurrentContext;
 use cust::device::DeviceAttribute;
 use cust::function::Function;
@@ -6,11 +6,13 @@ use cust::module::{ModuleJitOption, OptLevel};
 use cust::prelude::*;
 use kaspa_miner::xoshiro256starstar::Xoshiro256StarStar;
 use kaspa_miner::Worker;
-use log::{error, info};
+use log::{error, info, warn};
 use rand::{Fill, RngCore};
 use std::ffi::CString;
 use std::sync::{Arc, Weak};
+use cust::error::{CudaError, CudaResult};
 
+static SOURCE: &str = include_str!("../kaspa-cuda-native/src/kaspa-cuda.cu");
 static PTX_86: &str = include_str!("../resources/kaspa-cuda-sm86.ptx");
 static PTX_75: &str = include_str!("../resources/kaspa-cuda-sm75.ptx");
 static PTX_61: &str = include_str!("../resources/kaspa-cuda-sm61.ptx");
@@ -130,61 +132,59 @@ impl<'gpu> Worker for CudaGPUWorker<'gpu> {
 }
 
 impl<'gpu> CudaGPUWorker<'gpu> {
-    pub fn new(
-        device_id: u32,
-        workload: f32,
-        is_absolute: bool,
-        blocking_sync: bool,
-        random: NonceGenEnum,
-    ) -> Result<Self, Error> {
+    pub(crate) fn new(spec: &CudaWorkerSpec) -> Result<Self, Error> {
         info!("Starting a CUDA worker");
-        let sync_flag = match blocking_sync {
+        let sync_flag = match spec.blocking_sync {
             true => ContextFlags::SCHED_BLOCKING_SYNC,
             false => ContextFlags::SCHED_AUTO,
         };
-        let device = Device::get_device(device_id).unwrap();
+        let device = Device::get_device(spec.device_id).unwrap();
         let _context = Context::new(device)?;
         _context.set_flags(sync_flag)?;
 
         let major = device.get_attribute(DeviceAttribute::ComputeCapabilityMajor)?;
         let minor = device.get_attribute(DeviceAttribute::ComputeCapabilityMinor)?;
         let _module: Arc<Module>;
-        info!("Device #{} compute version is {}.{}", device_id, major, minor);
-        if major > 8 || (major == 8 && minor >= 6) {
-            _module = Arc::new(Module::from_ptx(PTX_86, &[ModuleJitOption::OptLevel(OptLevel::O4)]).map_err(|e| {
-                error!("Error loading PTX: {}", e);
-                e
-            })?);
-        } else if major > 7 || (major == 7 && minor >= 5) {
-            _module = Arc::new(Module::from_ptx(PTX_75, &[ModuleJitOption::OptLevel(OptLevel::O4)]).map_err(|e| {
-                error!("Error loading PTX: {}", e);
-                e
-            })?);
-        } else if major > 6 || (major == 6 && minor >= 1) {
-            _module = Arc::new(Module::from_ptx(PTX_61, &[ModuleJitOption::OptLevel(OptLevel::O4)]).map_err(|e| {
-                error!("Error loading PTX: {}", e);
-                e
-            })?);
-        } else if major >= 3 {
-            _module = Arc::new(Module::from_ptx(PTX_30, &[ModuleJitOption::OptLevel(OptLevel::O4)]).map_err(|e| {
-                error!("Error loading PTX: {}", e);
-                e
-            })?);
-        } else if major >= 2 {
-            _module = Arc::new(Module::from_ptx(PTX_20, &[ModuleJitOption::OptLevel(OptLevel::O4)]).map_err(|e| {
-                error!("Error loading PTX: {}", e);
-                e
-            })?);
-        } else {
-            return Err("Cuda compute version not supported".into());
-        }
+
+        info!("Device #{} compute version is {}.{}", spec.device_id, major, minor);
+        let module = match spec.use_binary {
+            true => {
+                if major > 8 || (major == 8 && minor >= 6) {
+                    Module::from_ptx(PTX_86, &[ModuleJitOption::OptLevel(OptLevel::O4)])
+                } else if major > 7 || (major == 7 && minor >= 5) {
+                    Module::from_ptx(PTX_75, &[ModuleJitOption::OptLevel(OptLevel::O4)])
+                } else if major > 6 || (major == 6 && minor >= 1) {
+                    Module::from_ptx(PTX_61, &[ModuleJitOption::OptLevel(OptLevel::O4)])
+                } else if major >= 3 {
+                    Module::from_ptx(PTX_30, &[ModuleJitOption::OptLevel(OptLevel::O4)])
+                } else if major >= 2 {
+                    Module::from_ptx(PTX_20, &[ModuleJitOption::OptLevel(OptLevel::O4)])
+                } else {
+                    Err(CudaError::FileNotFound)
+                }
+            },
+            false => {
+                compile_ptx()
+            }
+        };
+
+        let _module = Arc::new(match module {
+            Ok(m) => m,
+            Err(e) => {
+                warn!("Could not use prebuilt ptx: {}", e.to_string());
+                compile_ptx().map_err(|e| {
+                    error!("Error loading runtime-compiled PTX: {}", e);
+                    e
+                })?
+            }
+        });
 
         let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
 
         let mut heavy_hash_kernel = Kernel::new(Arc::downgrade(&_module), "heavy_hash")?;
 
         let mut chosen_workload = 0usize;
-        if is_absolute {
+        if spec.is_absolute {
             chosen_workload = 1;
         } else {
             let cur_workload = heavy_hash_kernel.get_workload();
@@ -192,17 +192,17 @@ impl<'gpu> CudaGPUWorker<'gpu> {
                 chosen_workload = cur_workload as usize;
             }
         }
-        chosen_workload = (chosen_workload as f32 * workload) as usize;
-        info!("GPU #{} Chosen workload: {}", device_id, chosen_workload);
+        chosen_workload = (chosen_workload as f32 * spec.workload) as usize;
+        info!("GPU #{} Chosen workload: {}", spec.device_id, chosen_workload);
         heavy_hash_kernel.set_workload(chosen_workload as u32);
 
         let final_nonce_buff = vec![0u64; 1].as_slice().as_dbuf()?;
 
-        let rand_state: DeviceBuffer<u64> = match random {
+        let rand_state: DeviceBuffer<u64> = match spec.random {
             NonceGenEnum::Xoshiro => {
                 info!("Using xoshiro for nonce-generation");
                 let mut buffer = DeviceBuffer::<u64>::zeroed(4 * chosen_workload).unwrap();
-                info!("GPU #{} is generating initial seed. This may take some time.", device_id);
+                info!("GPU #{} is generating initial seed. This may take some time.", spec.device_id);
                 let mut seed = [1u64; 4];
                 seed.try_fill(&mut rand::thread_rng())?;
                 buffer.copy_from(
@@ -213,7 +213,7 @@ impl<'gpu> CudaGPUWorker<'gpu> {
                         .collect::<Vec<u64>>()
                         .as_slice(),
                 )?;
-                info!("GPU #{} initialized", device_id);
+                info!("GPU #{} initialized", spec.device_id);
                 buffer
             }
             NonceGenEnum::Lean => {
@@ -225,7 +225,7 @@ impl<'gpu> CudaGPUWorker<'gpu> {
             }
         };
         Ok(Self {
-            device_id,
+            device_id: spec.device_id,
             _context,
             _module,
             workload: chosen_workload,
@@ -233,7 +233,30 @@ impl<'gpu> CudaGPUWorker<'gpu> {
             rand_state,
             final_nonce_buff,
             heavy_hash_kernel,
-            random,
+            random: spec.random,
         })
     }
+}
+
+fn compile_ptx() -> CudaResult<Module> {
+    let program = nvrtc::NvrtcProgram::new(SOURCE,"heavy_hash".into(), &[
+        include_str!("../kaspa-cuda-native/src/keccak-tiny.c"),
+        include_str!("../kaspa-cuda-native/src/xoshiro256starstar.c"),
+        include_str!("../kaspa-cuda-native/src/stdint.h")
+    ], &["keccak-tiny.c", "xoshiro256starstar.c", "stdint.h"]).map_err(|e| {error!("{}", e); CudaError::InvalidSource})?;
+    let flags = ["-std=c++11", "--restrict", "-Xptxas", "-O3", "-arch", "sm_61"];
+    info!("Compiling to PTX with flags: {}", flags.join(" "));
+    match program.compile(&flags) {
+        Ok(_) => {}
+        Err(e) => {
+            error!("{}: {}", e, program.get_log().unwrap());
+            return Err(CudaError::InvalidSource);
+        }
+    };
+    let ptx = match program.get_ptx() {
+        Ok(p) if p.len() == 0 => {return Err(CudaError::InvalidSource)},
+        Ok(p) => p,
+        Err(e) => {error!("{}", e); return Err(CudaError::InvalidSource)}
+    };
+    Module::from_ptx(ptx, &[ModuleJitOption::OptLevel(OptLevel::O4)])
 }

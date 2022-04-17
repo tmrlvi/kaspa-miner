@@ -131,6 +131,7 @@ impl Plugin for CudaPlugin {
                     is_absolute: opts.cuda_workload_absolute,
                     blocking_sync: !opts.cuda_no_blocking_sync,
                     random: opts.nonce_gen,
+                    use_binary: !opts.cuda_no_binary
                 })
                 .collect();
         }
@@ -145,6 +146,7 @@ struct CudaWorkerSpec {
     is_absolute: bool,
     blocking_sync: bool,
     random: NonceGenEnum,
+    pub use_binary: bool,
 }
 
 impl WorkerSpec for CudaWorkerSpec {
@@ -155,7 +157,7 @@ impl WorkerSpec for CudaWorkerSpec {
 
     fn build(&self) -> Box<dyn Worker> {
         Box::new(
-            CudaGPUWorker::new(self.device_id, self.workload, self.is_absolute, self.blocking_sync, self.random)
+            CudaGPUWorker::new(self)
                 .unwrap(),
         )
     }

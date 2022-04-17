@@ -55,6 +55,8 @@ pub struct CudaOpt {
         default_value = "lean"
     )]
     pub nonce_gen: NonceGenEnum,
+    #[clap(long = "cuda-no-binary", help = "Force use runtime compilation compilation")]
+    pub cuda_no_binary: bool,
 
     #[cfg(feature = "overclock")]
     #[clap(flatten)]

@@ -7,11 +7,7 @@
  * but not liability.
  */
 #define __STDC_WANT_LIB_EXT1__ 1
-
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "stdint.h"
 
 /******** The Keccak-f[1600] permutation ********/
 

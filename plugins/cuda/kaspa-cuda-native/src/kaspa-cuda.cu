@@ -1,5 +1,4 @@
-#include<stdint.h>
-#include <assert.h>
+#include "stdint.h"
 #include "keccak-tiny.c"
 #include "xoshiro256starstar.c"
 
@@ -39,7 +38,7 @@ __device__ __inline__ void amul4bit(uint32_t packed_vec1[32], uint32_t packed_ve
     #pragma unroll
     for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
         #if __CUDA_ARCH__ >= 610
-        res = __dp4a(packed_vec1[i], packed_vec2[i], res);
+        asm("dp4a.u32.u32" " %0, %1, %2, %3;": "=r" (res): "r" (packed_vec1[i]), "r" (packed_vec2[i]), "r" (res));
         #else
         res += a4[i].x*b4[i].x;
         res += a4[i].y*b4[i].y;
