@@ -131,7 +131,7 @@ impl Plugin for CudaPlugin {
                     is_absolute: opts.cuda_workload_absolute,
                     blocking_sync: !opts.cuda_no_blocking_sync,
                     random: opts.nonce_gen,
-                    use_binary: !opts.cuda_no_binary
+                    use_binary: !opts.cuda_no_binary,
                 })
                 .collect();
         }
@@ -156,10 +156,7 @@ impl WorkerSpec for CudaWorkerSpec {
     }
 
     fn build(&self) -> Box<dyn Worker> {
-        Box::new(
-            CudaGPUWorker::new(self)
-                .unwrap(),
-        )
+        Box::new(CudaGPUWorker::new(self).unwrap())
     }
 }
 

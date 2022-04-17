@@ -1,6 +1,7 @@
 use crate::{CudaWorkerSpec, Error, NonceGenEnum};
 use cust::context::CurrentContext;
 use cust::device::DeviceAttribute;
+use cust::error::{CudaError, CudaResult};
 use cust::function::Function;
 use cust::module::{ModuleJitOption, OptLevel};
 use cust::prelude::*;
@@ -10,7 +11,6 @@ use log::{error, info, warn};
 use rand::{Fill, RngCore};
 use std::ffi::CString;
 use std::sync::{Arc, Weak};
-use cust::error::{CudaError, CudaResult};
 
 static SOURCE: &str = include_str!("../kaspa-cuda-native/src/kaspa-cuda.cu");
 static PTX_86: &str = include_str!("../resources/kaspa-cuda-sm86.ptx");
@@ -162,10 +162,8 @@ impl<'gpu> CudaGPUWorker<'gpu> {
                 } else {
                     Err(CudaError::FileNotFound)
                 }
-            },
-            false => {
-                compile_ptx()
             }
+            false => compile_ptx(),
         };
 
         let _module = Arc::new(match module {
@@ -239,11 +237,20 @@ impl<'gpu> CudaGPUWorker<'gpu> {
 }
 
 fn compile_ptx() -> CudaResult<Module> {
-    let program = nvrtc::NvrtcProgram::new(SOURCE,"heavy_hash".into(), &[
-        include_str!("../kaspa-cuda-native/src/keccak-tiny.c"),
-        include_str!("../kaspa-cuda-native/src/xoshiro256starstar.c"),
-        include_str!("../kaspa-cuda-native/src/stdint.h")
-    ], &["keccak-tiny.c", "xoshiro256starstar.c", "stdint.h"]).map_err(|e| {error!("{}", e); CudaError::InvalidSource})?;
+    let program = nvrtc::NvrtcProgram::new(
+        SOURCE,
+        "heavy_hash".into(),
+        &[
+            include_str!("../kaspa-cuda-native/src/keccak-tiny.c"),
+            include_str!("../kaspa-cuda-native/src/xoshiro256starstar.c"),
+            include_str!("../kaspa-cuda-native/src/stdint.h"),
+        ],
+        &["keccak-tiny.c", "xoshiro256starstar.c", "stdint.h"],
+    )
+    .map_err(|e| {
+        error!("{}", e);
+        CudaError::InvalidSource
+    })?;
     let flags = ["-std=c++11", "--restrict", "-Xptxas", "-O3", "-arch", "sm_61"];
     info!("Compiling to PTX with flags: {}", flags.join(" "));
     match program.compile(&flags) {
@@ -254,9 +261,12 @@ fn compile_ptx() -> CudaResult<Module> {
         }
     };
     let ptx = match program.get_ptx() {
-        Ok(p) if p.len() == 0 => {return Err(CudaError::InvalidSource)},
+        Ok(p) if p.is_empty() => return Err(CudaError::InvalidSource),
         Ok(p) => p,
-        Err(e) => {error!("{}", e); return Err(CudaError::InvalidSource)}
+        Err(e) => {
+            error!("{}", e);
+            return Err(CudaError::InvalidSource);
+        }
     };
     Module::from_ptx(ptx, &[ModuleJitOption::OptLevel(OptLevel::O4)])
 }
