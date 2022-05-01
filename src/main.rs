@@ -70,6 +70,7 @@ fn filter_plugins(dirname: &str) -> Vec<String> {
 async fn get_client(
     kaspad_address: String,
     mining_address: String,
+    ssl_true: bool, // ssl False means ssl
     mine_when_not_synced: bool,
     block_template_ctr: Arc<AtomicU16>,
 ) -> Result<Box<dyn Client + 'static>, Error> {
@@ -78,6 +79,17 @@ async fn get_client(
         Ok(StratumHandler::connect(
             address.to_string().clone(),
             mining_address.clone(),
+            ssl_true: false,
+            mine_when_not_synced,
+            Some(block_template_ctr.clone()),
+        )
+        .await?)
+    } else if kaspad_address.starts_with("stratum+ssl://") {
+        let (_schema, address) = kaspad_address.split_once("://").unwrap();
+        Ok(StratumHandler::connect(
+            address.to_string().clone(),
+            mining_address.clone(),
+            ssl_true: true,
             mine_when_not_synced,
             Some(block_template_ctr.clone()),
         )
