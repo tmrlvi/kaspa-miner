@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
+use tokio_openssl::SslStream;
 use tokio_util::codec::Framed;
 
 mod statum_codec;
@@ -169,11 +170,17 @@ impl StratumHandler {
     pub async fn connect(
         address: String,
         miner_address: String,
+        ssl_true: bool,
         mine_when_not_synced: bool,
         block_template_ctr: Option<Arc<AtomicU16>>,
     ) -> Result<Box<Self>, Error> {
         info!("Connecting to {}", address);
-        let socket = TcpStream::connect(address).await?;
+        
+        if ssl_true == true {
+            let socket = SslStream::connect(address).await?;
+        } else {
+            let socket = TcpStream::connect(address).await?;
+        }
 
         let client = Framed::new(socket, NewLineJsonCodec::new());
         let (send_channel, recv) = mpsc::channel::<StratumLine>(3);
