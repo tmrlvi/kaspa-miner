@@ -70,7 +70,7 @@ fn filter_plugins(dirname: &str) -> Vec<String> {
 async fn get_client(
     kaspad_address: String,
     mining_address: String,
-    ssl_true: bool, // ssl False means ssl
+    ssl_true: bool, // ssl False => tcp
     mine_when_not_synced: bool,
     block_template_ctr: Arc<AtomicU16>,
 ) -> Result<Box<dyn Client + 'static>, Error> {
