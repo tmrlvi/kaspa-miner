@@ -3,7 +3,6 @@ name: Tests
 on: [push, pull_request]
 
 jobs:
-
   check:
     name: Check
     runs-on: ubuntu-latest
@@ -22,7 +21,7 @@ jobs:
           override: true
 
       - name: Install cuda
-        uses: Jimver/cuda-toolkit@v0.2.8
+        uses: Jimver/cuda-toolkit@v0.2.10
         with:
           cuda: '11.2.2'
           method: 'network'
@@ -78,7 +77,7 @@ jobs:
 
       - name: Install CUDA Linux
         if: runner.os == 'Linux'
-        uses: Jimver/cuda-toolkit@v0.2.8
+        uses: Jimver/cuda-toolkit@v0.2.10
         with:
           cuda: '11.2.2'
           method: 'network'
@@ -86,7 +85,7 @@ jobs:
 
       - name: Install CUDA Windows
         if: runner.os == 'Windows'
-        uses: Jimver/cuda-toolkit@v0.2.8
+        uses: Jimver/cuda-toolkit@v0.2.10
         with:
           cuda: '11.5.1'
           method: 'network'
@@ -168,7 +167,7 @@ jobs:
 
       - name: Install CUDA Linux
         if: runner.os == 'Linux'
-        uses: Jimver/cuda-toolkit@v0.2.8
+        uses: Jimver/cuda-toolkit@v0.2.10
         with:
           cuda: '11.2.2'
           method: 'network'
@@ -176,7 +175,7 @@ jobs:
 
       - name: Install CUDA Windows
         if: runner.os == 'Windows'
-        uses: Jimver/cuda-toolkit@v0.2.8
+        uses: Jimver/cuda-toolkit@v0.2.10
         with:
           cuda: '11.5.1'
           method: 'network'
@@ -242,7 +241,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install cuda
-        uses: Jimver/cuda-toolkit@v0.2.8
+        uses: Jimver/cuda-toolkit@v0.2.10
         with:
           cuda: '11.2.2'
           method: 'network'
@@ -271,3 +270,99 @@ jobs:
         with:
           command: clippy
           args: --tests -- -D warnings
+        
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Build gnu-linux on ubuntu-18.04 and musl on ubuntu latest
+        os: [ ubuntu-18.04, windows-2019, macos-latest ]
+        features: ["default", "kaspacuda/overclock "]
+    name: Building debug binary of ${{ matrix.os }} ${{ matrix.features }}
+    steps:
+      - name: Fix CRLF on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
+      - name: Fix LibOpenCL on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install ocl-icd-opencl-dev -y
+
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v2
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Install CUDA Linux
+        if: runner.os == 'Linux'
+        uses: Jimver/cuda-toolkit@v0.2.10
+        with:
+          cuda: '11.2.2'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart"]'
+
+      - name: Install CUDA Windows
+        if: runner.os == 'Windows'
+        uses: Jimver/cuda-toolkit@v0.2.10
+        with:
+          cuda: '11.5.1'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart"]'
+
+      - name: Build on Linux GNU
+        if: matrix.os == 'ubuntu-18.04'
+        # We're using musl to make the binaries statically linked and portable
+        run: |
+          cargo build --target=x86_64-unknown-linux-gnu --release --all --features ${{ matrix.features }}
+          feature_name=${{ matrix.features }}
+          asset_name="kaspa-miner-${{ github.event.release.tag_name }}-${feature_name/\//-}-linux-gnu-amd64"
+          strip ./target/x86_64-unknown-linux-gnu/release/kaspa-miner
+          mkdir ${asset_name}
+          mv ./target/x86_64-unknown-linux-gnu/release/kaspa-miner ${asset_name}/${asset_name}
+          mv ./target/x86_64-unknown-linux-gnu/release/libkaspa*.so ${asset_name}/
+          tar czvf ${asset_name}.tgz ${asset_name}
+          echo "archive=${asset_name}.tgz" >> $GITHUB_ENV
+          echo "asset_name=${asset_name}.tgz" >> $GITHUB_ENV
+
+      - name: Build on Windows
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          cargo build --target=x86_64-pc-windows-msvc --release --all --features ${{ matrix.features }}
+          feature_name=${{ matrix.features }}
+          asset_name="kaspa-miner-${{ github.event.release.tag_name }}-${feature_name/\//-}-win64-amd64"
+          mkdir ${asset_name}
+          mv ./target/x86_64-pc-windows-msvc/release/kaspa-miner.exe ${asset_name}/${asset_name}.exe
+          mv ./target/x86_64-pc-windows-msvc/release/kaspa*.dll ${asset_name}/
+          bash ./integrations/windows/create_bat.sh ${asset_name}
+          7z a -tzip -r ${asset_name}.zip ${asset_name}
+          echo "archive=${asset_name}.zip" >> $GITHUB_ENV
+          echo "asset_name=${asset_name}.zip" >> $GITHUB_ENV
+
+      - name: Build on MacOS
+        if: matrix.os == 'macos-latest'
+        run: |
+          cargo build --target=x86_64-apple-darwin --release -p kaspa-miner
+          asset_name="kaspa-miner-${{ github.event.release.tag_name }}-cpu-only-osx-amd64"
+          mkdir ${asset_name}
+          mv ./target/x86_64-apple-darwin/release/kaspa-miner ${asset_name}/${asset_name}
+          tar czvf ${asset_name}.tgz ${asset_name}
+          echo "archive=${asset_name}.tgz" >> $GITHUB_ENV
+          echo "asset_name=${asset_name}.tgz" >> $GITHUB_ENV
+
+      - name: Upload binary to GitHub 
+        uses: actions/upload-artifact@v3
+        with: 
+          name: "${{ runner.os }} binary"
+          path: "./${{ env.archive }}/"
