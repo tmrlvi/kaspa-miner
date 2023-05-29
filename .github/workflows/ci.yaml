@@ -277,7 +277,7 @@ jobs:
       fail-fast: false
       matrix:
         # Build gnu-linux on ubuntu-18.04 and musl on ubuntu latest
-        os: [ ubuntu-18.04, windows-latest, macos-latest ]
+        os: [ ubuntu-18.04, windows-2019, macos-latest ]
         features: ["default", "kaspacuda/overclock "]
     name: Building debug binary of ${{ matrix.os }} ${{ matrix.features }}
     steps:
