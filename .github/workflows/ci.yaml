@@ -364,5 +364,5 @@ jobs:
       - name: Upload binary to GitHub 
         uses: actions/upload-artifact@v3
         with: 
-          name: "${{ env.asset_name }}"
-          path: "./${{ env.archive }}"
+          name: "${{ runner.os }} binary"
+          path: "./${{ env.archive }}/"
